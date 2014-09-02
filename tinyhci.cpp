@@ -231,7 +231,7 @@ uint32_t hci_read_u32_le()
 HCI_ATTR 
 void hci_read_array(uint8_t *data, uint16_t length)
 {
-  while (length);
+  while (length)
   {
     *data = hci_read_u8();
     data++;
@@ -268,7 +268,7 @@ void hci_write_u32_le(uint32_t v)
 HCI_ATTR 
 void hci_write_array(uint8_t *data, uint16_t length)
 {
-  while (length);
+  while (length)
   {
     hci_write_u8(*data);
     data++;
@@ -388,7 +388,7 @@ void hci_end_command_begin_receive(uint16_t event)
 }
 
 HCI_ATTR 
-void hci_data_send(uint16_t opcode, uint16_t event, void *args, uint8_t argsSize, void *buffer, uint16_t bufferSize)
+void hci_begin_data(uint16_t opcode, uint8_t argsSize, uint16_t bufferSize)
 { 
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
 
@@ -406,50 +406,23 @@ void hci_data_send(uint16_t opcode, uint16_t event, void *args, uint8_t argsSize
   // 3. The master starts the write transaction. The write transaction consists of a 5-byte header
   //    followed by the payload and a padding byte (if required: remember, the total packet length
   //    must be 16-bit aligned).
-  int hciPayloadSize = argsSize + bufferSize;
-  int pad = (hciPayloadSize & 1) != 0;
-  int payloadSize = 4 + hciPayloadSize + pad;
+  int totalSize = argsSize + bufferSize;
+  hci_pad = (totalSize & 1) != 0;
+  hci_payload_size = 4 + totalSize + hci_pad;
   hci_transfer(WRITE);
-  hci_transfer(payloadSize >> 8);
-  hci_transfer(payloadSize);
+  hci_transfer(hci_payload_size >> 8);
+  hci_transfer(hci_payload_size);
   hci_transfer(0);
   hci_transfer(0);
-
-  hci_pending_event = event;
-  hci_pending_event_available = 0;
 
   hci_transfer(HCI_TYPE_DATA);
   hci_transfer(opcode);
   hci_transfer(argsSize);
-  hci_transfer(hciPayloadSize);
-  hci_transfer(hciPayloadSize >> 8);
-
-  unsigned char *data = (unsigned char *)args;
-  int size = argsSize;
-  while (size)
-  {
-    hci_transfer(*data);
-    size--;
-    data++;
-  }
-  
-  data = (unsigned char *)buffer;
-  size = bufferSize;
-  while (size)
-  {
-    hci_transfer(*data);
-    size--;
-    data++;
-  }
-  
-  if (pad)
-    hci_transfer(0);
-
-  // 4. After the last byte of data, the nCS is deasserted by the master.
-  digitalWrite(CC3K_CS_PIN, HIGH);
-
-  // 5. The CC3000 device deasserts the IRQ line.
+  hci_transfer(totalSize);
+  hci_transfer(totalSize >> 8);
 }
+
+#define hci_end_data_begin_receive hci_end_command_begin_receive
 
 HCI_ATTR 
 void hci_dispatch_event(void)
@@ -659,9 +632,9 @@ void wifi_init(void)
   hci_read_status();
   buffer_count = hci_read_u8();
   avail_buffer_count = buffer_count;
-  SERIAL_PRINTVAR(buffer_count);
+  DEBUG_LV2(SERIAL_PRINTVAR(buffer_count));
   buffer_size = hci_read_u16_le();
-  SERIAL_PRINTVAR(buffer_size);
+  DEBUG_LV2(SERIAL_PRINTVAR(buffer_size));
   hci_end_receive();
 
   hci_begin_command(HCI_CMND_EVENT_MASK, 4);
@@ -800,7 +773,7 @@ int listen(int sd, int backlog)
   hci_write_u32_le(sd);
   hci_write_u32_le(backlog);
 
-  return hci_end_command_receive_u32_result(HCI_CMND_SOCKET);
+  return hci_end_command_receive_u32_result(HCI_CMND_LISTEN);
 }
 
 int bind(int sd, struct _sockaddr_t *addr, int addrlen)
@@ -928,12 +901,13 @@ int send(int sd, uint8_t *buffer, int size, int flags)
     ;
   avail_buffer_count--;
   
-  hci_begin_command(HCI_CMND_SEND, 16);
+  hci_begin_data(HCI_CMND_SEND, 16, size);
   hci_write_u32_le(sd);
   hci_write_u32_le(12);
   hci_write_u32_le(size);
   hci_write_u32_le(flags);
-  hci_end_command_begin_receive(HCI_EVNT_SEND);
+  hci_write_array(buffer, size);
+  hci_end_data_begin_receive(HCI_EVNT_SEND);
   hci_end_receive();
 
   return size;
@@ -973,5 +947,5 @@ int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned
   hci_write_u32_le(deviceServiceNameLength);
   hci_write_array((uint8_t*)deviceServiceName, deviceServiceNameLength);
 
-  return hci_end_command_receive_u32_result(HCI_CMND_CLOSE_SOCKET);
+  return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
 }
