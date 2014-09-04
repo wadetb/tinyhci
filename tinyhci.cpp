@@ -22,170 +22,119 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 #include <SPI.h>
 #include "tinyhci.h"
 
+//
+// Redefine these based on your particular hardware.
+//
 #define CC3K_CS_PIN    6
 #define CC3K_IRQ_PIN   7
 #define CC3K_EN_PIN    8
 #define CC3K_IRQ_NUM   4
 
-uint8_t wifi_connected = 0;
-uint8_t wifi_dhcp = 0;
-uint8_t ip_addr[4];
+// 
+// Global variables
+//
+volatile uint8_t wifi_connected = 0;
+volatile uint8_t wifi_dhcp = 0;
+volatile uint8_t ip_addr[4];
 
-int16_t listen_socket = -1;
-int16_t client_socket = -1;
+volatile int16_t client_socket = -1;
 
-volatile uint8_t hci_data_available;
-volatile uint8_t hci_pending_event_available;
-volatile uint16_t hci_pending_event = 0xffff;
+//
+// Static variables
+//
+static volatile uint8_t hci_data_available;
+static volatile uint8_t hci_pending_event_available;
+static volatile uint16_t hci_pending_event = 0xffff;
 
-int buffer_size;
-int buffer_count;
-volatile int avail_buffer_count;
+static uint16_t hci_buffer_size;
+static uint8_t hci_buffer_count;
+static volatile uint8_t hci_available_buffer_count;
 
-uint16_t hci_payload_size;
+static uint16_t hci_payload_size;
+static uint8_t hci_pad;
 
 #define HCI_STATE_IDLE          0
 #define HCI_STATE_WAIT_ASSERT   1
 
-volatile uint8_t hci_state;
+static volatile uint8_t hci_state;
 
-uint8_t hci_pad;
-uint16_t rx_payload_size;
+//
+// HCI interface constants
+//
+#define HCI_READ                                0x3
+#define HCI_WRITE                               0x1
 
-void hci_begin_receive();
-void hci_end_receive();
-void hci_dispatch();
+#define HCI_TYPE_CMND                           0x1
+#define HCI_TYPE_DATA                           0x2
+#define HCI_TYPE_PATCH                          0x3
+#define HCI_TYPE_EVNT                           0x4
 
-#define READ                    3
-#define WRITE                   1
+//
+// HCI Command IDs
+//
+#define HCI_CMND_WLAN_CONNECT                   0x0001
+#define HCI_CMND_WLAN_DISCONNECT                0x0002
+#define HCI_CMND_WLAN_IOCTL_SET_CONNECTION_POLICY 0x0004
+#define HCI_CMND_EVENT_MASK                     0x0008
 
-#define HCI_TYPE_CMND          0x1
-#define HCI_TYPE_DATA          0x2
-#define HCI_TYPE_PATCH         0x3
-#define HCI_TYPE_EVNT          0x4
+#define HCI_CMND_SEND                           0x0081
+#define HCI_CMND_SENDTO                         0x0083
+#define HCI_DATA_BSD_RECVFROM                   0x0084
+#define HCI_DATA_BSD_RECV                       0x0085
 
-#define HCI_EVENT_PATCHES_DRV_REQ     (1)
-#define HCI_EVENT_PATCHES_FW_REQ      (2)
-#define HCI_EVENT_PATCHES_BOOTLOAD_REQ    (3)
+#define HCI_CMND_SOCKET                         0x1001
+#define HCI_CMND_BIND                           0x1002
+#define HCI_CMND_RECV                           0x1004
+#define HCI_CMND_ACCEPT                         0x1005
+#define HCI_CMND_LISTEN                         0x1006
+#define HCI_CMND_CONNECT                        0x1007
+#define HCI_CMND_SETSOCKOPT                     0x1009
+#define HCI_CMND_CLOSE_SOCKET                   0x100B
+#define HCI_CMND_MDNS_ADVERTISE                 0x1011
 
-#define HCI_CMND_WLAN_BASE  (0x0000)
-#define HCI_CMND_WLAN_CONNECT  0x0001
-#define HCI_CMND_WLAN_DISCONNECT   0x0002
-#define HCI_CMND_WLAN_IOCTL_SET_SCANPARAM    0x0003
-#define HCI_CMND_WLAN_IOCTL_SET_CONNECTION_POLICY  0x0004
-#define HCI_CMND_WLAN_IOCTL_ADD_PROFILE  0x0005
-#define HCI_CMND_WLAN_IOCTL_DEL_PROFILE  0x0006
-#define HCI_CMND_WLAN_IOCTL_GET_SCAN_RESULTS  0x0007
-#define HCI_CMND_EVENT_MASK    0x0008
-#define HCI_CMND_WLAN_IOCTL_STATUSGET 0x0009
-#define HCI_CMND_WLAN_IOCTL_SIMPLE_CONFIG_START        0x000A
-#define HCI_CMND_WLAN_IOCTL_SIMPLE_CONFIG_STOP         0x000B
-#define HCI_CMND_WLAN_IOCTL_SIMPLE_CONFIG_SET_PREFIX   0x000C
-#define HCI_CMND_WLAN_CONFIGURE_PATCH         0x000D
+#define HCI_NETAPP_SET_TIMERS                   0x2009
 
-#define HCI_CMND_SOCKET_BASE   0x1000
-#define HCI_CMND_SOCKET        0x1001
-#define HCI_CMND_BIND          0x1002
-#define HCI_CMND_RECV          0x1004
-#define HCI_CMND_ACCEPT        0x1005
-#define HCI_CMND_LISTEN        0x1006
-#define HCI_CMND_CONNECT       0x1007
-#define HCI_CMND_BSD_SELECT   0x1008
-#define HCI_CMND_SETSOCKOPT    0x1009
-#define HCI_CMND_GETSOCKOPT    0x100A
-#define HCI_CMND_CLOSE_SOCKET  0x100B
-#define HCI_CMND_RECVFROM      0x100D
-#define HCI_CMND_GETHOSTNAME   0x1010
-#define HCI_CMND_MDNS_ADVERTISE    0x1011
+#define HCI_CMND_SIMPLE_LINK_START              0x4000
+#define HCI_CMND_READ_BUFFER_SIZE               0x400B
 
+//
+// HCI Event IDs
+//
+#define HCI_EVNT_SEND                           0x1003
 
-#define HCI_DATA_BASE               0x80
+#define HCI_EVNT_DATA_UNSOL_FREE_BUFF           0x4100
 
-#define HCI_CMND_SEND                     (0x01 + HCI_DATA_BASE)
-#define HCI_CMND_SENDTO                   (0x03 + HCI_DATA_BASE)
-#define HCI_DATA_BSD_RECVFROM           (0x04 + HCI_DATA_BASE)
-#define HCI_DATA_BSD_RECV             (0x05 + HCI_DATA_BASE)
+#define HCI_EVNT_WLAN_UNSOL_CONNECT             0x8001
+#define HCI_EVNT_WLAN_UNSOL_DISCONNECT          0x8002
+#define HCI_EVNT_WLAN_UNSOL_INIT                0x8004
+#define HCI_EVNT_WLAN_UNSOL_DHCP                0x8010
+#define HCI_EVNT_WLAN_KEEPALIVE                 0x8200
+#define HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT      0x8800
 
-#define HCI_CMND_NVMEM_CBASE    (0x0200)
-
-
-#define HCI_CMND_NVMEM_CREATE_ENTRY (0x0203)
-#define HCI_CMND_NVMEM_SWAP_ENTRY   (0x0205)
-#define HCI_CMND_NVMEM_READ       (0x0201)
-#define HCI_CMND_NVMEM_WRITE      (0x0090)
-#define HCI_CMND_NVMEM_WRITE_PATCH  (0x0204)
-#define HCI_CMND_READ_SP_VERSION    (0x0207)
-
-#define  HCI_CMND_READ_BUFFER_SIZE  0x400B
-#define  HCI_CMND_SIMPLE_LINK_START 0x4000
-
-#define HCI_CMND_NETAPP_BASE    0x2000
-
-#define HCI_NETAPP_DHCP       (0x0001 + HCI_CMND_NETAPP_BASE)
-#define HCI_NETAPP_PING_SEND        (0x0002 + HCI_CMND_NETAPP_BASE)
-#define HCI_NETAPP_PING_REPORT      (0x0003 + HCI_CMND_NETAPP_BASE)
-#define HCI_NETAPP_PING_STOP        (0x0004 + HCI_CMND_NETAPP_BASE)
-#define HCI_NETAPP_IPCONFIG         (0x0005 + HCI_CMND_NETAPP_BASE)
-#define HCI_NETAPP_ARP_FLUSH    (0x0006 + HCI_CMND_NETAPP_BASE)
-#define HCI_NETAPP_SET_DEBUG_LEVEL  (0x0008 + HCI_CMND_NETAPP_BASE)
-#define HCI_NETAPP_SET_TIMERS   (0x0009 + HCI_CMND_NETAPP_BASE)
-
-#define HCI_EVNT_WLAN_BASE     0x0000
-#define HCI_EVNT_WLAN_CONNECT  0x0001
-#define HCI_EVNT_WLAN_DISCONNECT 0x0002
-#define HCI_EVNT_WLAN_IOCTL_ADD_PROFILE 0x0005
-
-#define HCI_EVNT_SEND          0x1003
-#define HCI_EVNT_WRITE         0x100E
-#define HCI_EVNT_SENDTO        0x100F
-
-#define HCI_EVNT_PATCHES_REQ    0x1000
-
-#define HCI_EVNT_UNSOL_BASE    0x4000
-
-#define HCI_EVNT_WLAN_UNSOL_BASE     (0x8000)
-
-#define HCI_EVNT_WLAN_UNSOL_CONNECT    (0x0001 + HCI_EVNT_WLAN_UNSOL_BASE)
-#define HCI_EVNT_WLAN_UNSOL_DISCONNECT   (0x0002 + HCI_EVNT_WLAN_UNSOL_BASE)
-#define HCI_EVNT_WLAN_UNSOL_INIT         (0x0004 + HCI_EVNT_WLAN_UNSOL_BASE)
-#define HCI_EVNT_WLAN_TX_COMPLETE         (0x0008 + HCI_EVNT_WLAN_UNSOL_BASE)
-#define HCI_EVNT_WLAN_UNSOL_DHCP         (0x0010 + HCI_EVNT_WLAN_UNSOL_BASE)
-#define HCI_EVNT_WLAN_ASYNC_PING_REPORT  (0x0040 + HCI_EVNT_WLAN_UNSOL_BASE)
-#define HCI_EVNT_WLAN_ASYNC_SIMPLE_CONFIG_DONE  (0x0080 + HCI_EVNT_WLAN_UNSOL_BASE)
-#define HCI_EVNT_WLAN_KEEPALIVE      (0x0200  + HCI_EVNT_WLAN_UNSOL_BASE)
-#define HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT      (0x0800 + HCI_EVNT_WLAN_UNSOL_BASE)
-
-#define HCI_EVNT_DATA_UNSOL_FREE_BUFF 0x4100
-
-#define HCI_EVNT_NVMEM_WRITE    (0x0202)
-
-#define HCI_EVNT_INPROGRESS     0xFFFF
-
+//
+// HCI Data commands
+//
 #define HCI_DATA_RECVFROM       0x84
 #define HCI_DATA_RECV           0x85
 #define HCI_DATA_NVMEM          0x91
 
-#define HCI_EVENT_CC3000_CAN_SHUT_DOWN 0x99
-
-#define PATCHES_HOST_TYPE_WLAN_DRIVER   0x01
-#define PATCHES_HOST_TYPE_WLAN_FW       0x02
-#define PATCHES_HOST_TYPE_BOOTLOADER    0x03
-
-#define SL_SET_SCAN_PARAMS_INTERVAL_LIST_SIZE (16)
-#define SL_SIMPLE_CONFIG_PREFIX_LENGTH  (3)
-#define ETH_ALEN                    (6)
-#define MAXIMAL_SSID_LENGTH             (32)
-
-#define SL_PATCHES_REQUEST_DEFAULT    (0)
-#define SL_PATCHES_REQUEST_FORCE_HOST (1)
-#define SL_PATCHES_REQUEST_FORCE_NONE (2)
+//
+// HCI Command/Event argument constants
+//
+#define SL_PATCHES_REQUEST_DEFAULT              0
 
 #define HCI_ATTR __attribute__((noinline))
 
+// 
+// hci_transfer
+//
+// Transfers one byte across HCI, the basis of all CC3000 communications.
+// Enable DEBUG_LV4 in tinyhci.h to watch the traffic via the serial port.
+//
 HCI_ATTR 
-unsigned char hci_transfer(unsigned char out) 
+uint8_t hci_transfer(uint8_t out) 
 { 
-  unsigned char in = SPI.transfer(out); 
+  uint8_t in = SPI.transfer(out); 
   DEBUG_LV4(
     Serial.print("SPI: ");
     Serial.print(out, HEX);
@@ -196,8 +145,14 @@ unsigned char hci_transfer(unsigned char out)
   return in;
 }
 
+// 
+// Low level SPI reading functions for various data types.
+//
+// Note that these respect the payload size from the most recently read HCI header,
+//  and will not overrun it; preferring to return 0s instead.
+//
 HCI_ATTR 
-uint8_t hci_read_u8()
+uint8_t hci_read_u8(void)
 {
   if (hci_payload_size > 0)
   {
@@ -211,7 +166,7 @@ uint8_t hci_read_u8()
 }
 
 HCI_ATTR 
-uint16_t hci_read_u16_le()
+uint16_t hci_read_u16_le(void)
 {
   uint8_t b0 = hci_read_u8();
   uint8_t b1 = hci_read_u8();
@@ -219,7 +174,7 @@ uint16_t hci_read_u16_le()
 }
 
 HCI_ATTR 
-uint32_t hci_read_u32_le()
+uint32_t hci_read_u32_le(void)
 {
   uint8_t b0 = hci_read_u8();
   uint8_t b1 = hci_read_u8();
@@ -239,6 +194,12 @@ void hci_read_array(uint8_t *data, uint16_t length)
   }
 }
 
+// 
+// Low level SPI writing functions for various data types.
+//
+// Note that these respect the payload size from the most recently written HCI header,
+//  and will not overrun it; sending nothing.
+//
 HCI_ATTR 
 uint8_t hci_write_u8(uint8_t v)
 {
@@ -266,164 +227,88 @@ void hci_write_u32_le(uint32_t v)
 }
 
 HCI_ATTR 
-void hci_write_array(uint8_t *data, uint16_t length)
+void hci_write_array(const void *data, uint16_t length)
 {
+  const uint8_t *pos = (uint8_t*)data;
   while (length)
   {
-    hci_write_u8(*data);
-    data++;
+    hci_write_u8(*pos);
+    pos++;
     length--;
   }
 }
 
+//
+// hci_begin_receive
+//
+// Reads the headers for an HCI event or data message, called by the interrupt handler.
+//
 HCI_ATTR 
-void hci_irq()
+void hci_begin_receive(void)
 {
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
-  if (hci_state == HCI_STATE_WAIT_ASSERT)
-  {
-    hci_state = HCI_STATE_IDLE;
-  }
-  else 
-  {
-    hci_begin_receive();
-    hci_dispatch();
-  }
-}
 
-HCI_ATTR 
-void hci_begin_first_command(uint16_t opcode, uint16_t argsSize)
-{ 
-  DEBUG_LV3(SERIAL_PRINTFUNCTION());
+  // Master Read Transaction
 
-  // First Host Write Operation
+  // 1. The IRQ line is asserted by the CC3000 device.
 
-  // 1. The master detects the IRQ line low: in this case the detection of IRQ low does not 
-  //    indicate the intention of the CC3000 device to communicate with the master but rather 
-  //    CC3000 readiness after power up.
-  uint16_t start = millis();
-  while (digitalRead(CC3K_IRQ_PIN) != LOW)
-  {
-    if (millis() - start >= 5000)
-    {
-      SERIAL_PRINTLN("Failed to detect CC3000.  Check wiring?");
-      for (;;);
-    }
-  }
-
-  // 2. The master asserts nCS.
+  // 2. The master asserts the nCS line.
   digitalWrite(CC3K_CS_PIN, LOW);
 
-  // 3. The master introduces a delay of at least 50 μs before starting actual transmission of data.
-  delay(50);
-
-  // 4. The master transmits the first 4 bytes of the SPI header.
-  uint16_t pad = !(argsSize & 1);
-  uint16_t payloadSize = 4 + argsSize + pad;
-  hci_transfer(WRITE);
-  hci_transfer(payloadSize >> 8);
-  hci_transfer(payloadSize & 0xff);
+  // 3. The master transmits the following 3 bytes: read opcode followed by two busy bytes
+  hci_transfer(HCI_READ);
+  hci_transfer(0);
   hci_transfer(0);
 
-  // 5. The master introduces a delay of at least an additional 50 μs.
-  delay(50);
+  // 4. The CC3000 sends back the following data: the first two bytes indicate the payload length 
+  //    and the data payload bytes follow, immediately after.
+  uint8_t p0 = hci_transfer(0);
+  uint8_t p1 = hci_transfer(0);
 
-  // 6. The master transmits the rest of the packet.
-  hci_transfer(0);
-  hci_transfer(HCI_TYPE_CMND);
-  hci_transfer(opcode & 0xff);
-  hci_transfer(opcode >> 8);
-  hci_transfer(argsSize);
+  hci_payload_size = (p0 << 8) | p1;
+  DEBUG_LV3(SERIAL_PRINTVAR(hci_payload_size));
 }
 
+//
+// hci_end_receive
+//
+// Finishes reading the current event or data message, discarding any unread portion.
+// Called both inside and outside the interrupt handler.
+//
 HCI_ATTR 
-void hci_begin_command(uint16_t opcode, uint16_t argsSize)
-{ 
-  DEBUG_LV3(SERIAL_PRINTFUNCTION());
-
-  // Generic Host Write Operation
-  hci_state = HCI_STATE_WAIT_ASSERT;
-
-  // 1. The master asserts nCS (that is, drives the signal low) and waits for IRQ assertion.
-  digitalWrite(CC3K_CS_PIN, LOW);
-
-  // 2. The CC3000 device asserts IRQ when ready to receive the data.
-  while (hci_state != HCI_STATE_IDLE)
-    ;
-
-  // 3. The master starts the write transaction. The write transaction consists of a 5-byte header
-  //    followed by the payload and a padding byte (if required: remember, the total packet length
-  //    must be 16-bit aligned).
-  hci_pad = (argsSize & 1) == 0;
-  hci_payload_size = 4 + argsSize + hci_pad;
-  hci_transfer(WRITE);
-  hci_transfer(hci_payload_size >> 8);
-  hci_transfer(hci_payload_size & 0xff);
-  hci_transfer(0);
-  hci_transfer(0);
-
-  hci_transfer(HCI_TYPE_CMND);
-  hci_transfer(opcode & 0xff);
-  hci_transfer(opcode >> 8);
-  hci_transfer(argsSize);
-}
-
-HCI_ATTR 
-void hci_end_command_begin_receive(uint16_t event)
+void hci_end_receive(void)
 {
-  hci_pending_event = event;
-  hci_pending_event_available = 0;
-  hci_data_available = 0;
+  DEBUG_LV3(
+    SERIAL_PRINTFUNCTION();
+    SERIAL_PRINTVAR(hci_payload_size);
+    )
 
-  if (hci_pad)
-    hci_transfer(0);
+  // Read and discard any unread portion of the message.
+  while (hci_payload_size)
+    hci_read_u8();
 
-  // 4. After the last byte of data, the nCS is deasserted by the master.
+  // 5. At the end of read transaction, the master drives nCS inactive.
   digitalWrite(CC3K_CS_PIN, HIGH);
 
-  // 5. The CC3000 device deasserts the IRQ line.
-
-  while (!hci_pending_event_available)
+  // 6. The CC3000 device deasserts an IRQ line.
+  while (digitalRead(CC3K_IRQ_PIN) == LOW)
     ;
 }
 
-HCI_ATTR 
-void hci_begin_data(uint16_t opcode, uint8_t argsSize, uint16_t bufferSize)
-{ 
-  DEBUG_LV3(SERIAL_PRINTFUNCTION());
-
-  // Generic Host Write Operation
-
-  // 1. The master asserts nCS (that is, drives the signal low) and waits for IRQ assertion.
-  hci_state = HCI_STATE_WAIT_ASSERT;
-
-  digitalWrite(CC3K_CS_PIN, LOW);
-
-  // 2. The CC3000 device asserts IRQ when ready to receive the data.
-  while (hci_state != HCI_STATE_IDLE)
-    ;
-
-  // 3. The master starts the write transaction. The write transaction consists of a 5-byte header
-  //    followed by the payload and a padding byte (if required: remember, the total packet length
-  //    must be 16-bit aligned).
-  int totalSize = argsSize + bufferSize;
-  hci_pad = (totalSize & 1) != 0;
-  hci_payload_size = 4 + totalSize + hci_pad;
-  hci_transfer(WRITE);
-  hci_transfer(hci_payload_size >> 8);
-  hci_transfer(hci_payload_size);
-  hci_transfer(0);
-  hci_transfer(0);
-
-  hci_transfer(HCI_TYPE_DATA);
-  hci_transfer(opcode);
-  hci_transfer(argsSize);
-  hci_transfer(totalSize);
-  hci_transfer(totalSize >> 8);
-}
-
-#define hci_end_data_begin_receive hci_end_command_begin_receive
-
+//
+// hci_dispatch_event
+//
+// This is the main incoming event handler, called by the interrupt handler.  
+// It has three different modes of operation, depending on the event type.
+//
+// If we are waiting for the CC3000 to respond to a command with a specific event (hci_pending_event),
+// we mark it as available and return.  The non-interrupt code will then take care of receiving the
+// event contents.
+//
+// If it's an unsolicited event that we care about, we receive the event contents and handle them.
+//
+// If it's neither type, we discard all of the event contents.
+//
 HCI_ATTR 
 void hci_dispatch_event(void)
 {
@@ -471,13 +356,13 @@ void hci_dispatch_event(void)
     case HCI_EVNT_DATA_UNSOL_FREE_BUFF:
       {
         hci_read_u8(); // status
-        int fce_count = hci_read_u16_le();
-        for (int i = 0; i < fce_count; i++)
+        uint16_t fce_count = hci_read_u16_le();
+        for (uint16_t i = 0; i < fce_count; i++)
         {
           hci_read_u16_le(); // ??
-          avail_buffer_count += hci_read_u16_le();
+          hci_available_buffer_count += hci_read_u16_le();
         }
-        DEBUG_LV3(SERIAL_PRINTVAR(avail_buffer_count));
+        DEBUG_LV3(SERIAL_PRINTVAR(hci_available_buffer_count));
       }
       break;
     
@@ -489,6 +374,15 @@ void hci_dispatch_event(void)
   }
 }
 
+//
+// hci_dispatch_data
+//
+// This is the incoming data handler, called by the interrupt handler.
+// It skips over the data arguments and flags data as being available, before returning
+// from the interrupt.  We are presumed to be inside a function that is expecting data.
+//
+// Known issue: Unexpected data is currently not handled, see the implementation of recv.
+//
 HCI_ATTR 
 void hci_dispatch_data(void)
 {
@@ -498,15 +392,21 @@ void hci_dispatch_data(void)
   uint8_t rx_args_size = hci_read_u8();
   DEBUG_LV3(SERIAL_PRINTVAR(rx_args_size));
 
-  rx_payload_size = hci_read_u16_le();
+  uint16_t rx_payload_size = hci_read_u16_le();
   DEBUG_LV3(SERIAL_PRINTVAR(rx_payload_size));
 
-  for (int i = 0; i < rx_args_size; i++)
+  for (uint8_t i = 0; i < rx_args_size; i++)
     hci_read_u8();
 
   hci_data_available = 1;
 }
 
+// 
+// hci_dispatch
+//
+// Called by the interrupt handler to reads the incoming transmition type and dispatch 
+// it accordingly.  See hci_dispatch_event and hci_dispatch_data for details. 
+//
 HCI_ATTR 
 void hci_dispatch(void)
 {
@@ -521,54 +421,199 @@ void hci_dispatch(void)
     hci_dispatch_data();
 }
 
+// 
+// Interrupt handler
+//
+// There are two modes for the interrupt handler: waiting for assertion and idle.
+//
+// Waiting for assertion is a special mode, wherein a function that is about to communicate
+// with the CC3000 enables the mode and then asserts the CS.  The response from the CC3000 is 
+// to raise an interrupt, which we do not want to process.  Instead, we notify the function
+// that the expect interrupt has been received by restoring the state to idle.
+//
+// In idle mode, the interrupt handler reads the event handler and then dispatches it
+// according to its type.  See hci_dispatch for more information.
+//
 HCI_ATTR 
-void hci_begin_receive()
+void hci_irq(void)
 {
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
-
-  // Master Read Transaction
-
-  // 1. The IRQ line is asserted by the CC3000 device.
-
-  // 2. The master asserts the nCS line.
-  digitalWrite(CC3K_CS_PIN, LOW);
-
-  // 3. The master transmits the following 3 bytes: read opcode followed by two busy bytes
-  hci_transfer(READ);
-  hci_transfer(0);
-  hci_transfer(0);
-
-  // 4. The CC3000 sends back the following data: the first two bytes indicate the payload length 
-  //    and the data payload bytes follow, immediately after.
-  uint8_t p0 = hci_transfer(0);
-  uint8_t p1 = hci_transfer(0);
-
-  hci_payload_size = (p0 << 8) | p1;
-  DEBUG_LV3(SERIAL_PRINTVAR(hci_payload_size));
+  if (hci_state == HCI_STATE_WAIT_ASSERT)
+  {
+    hci_state = HCI_STATE_IDLE;
+  }
+  else 
+  {
+    hci_begin_receive();
+    hci_dispatch();
+  }
 }
 
+//
+// hci_begin_first_command
+//
+// Sends the headers for a given opcode, with special handling for the first command after
+// the CC3000 powers on.
+//
 HCI_ATTR 
-void hci_end_receive()
+void hci_begin_first_command(uint16_t opcode, uint16_t argsSize)
+{ 
+  DEBUG_LV3(SERIAL_PRINTFUNCTION());
+
+  // First Host Write Operation
+
+  // 1. The master detects the IRQ line low: in this case the detection of IRQ low does not 
+  //    indicate the intention of the CC3000 device to communicate with the master but rather 
+  //    CC3000 readiness after power up.
+  uint16_t start = millis();
+  while (digitalRead(CC3K_IRQ_PIN) != LOW)
+  {
+    if (millis() - start >= 5000)
+    {
+      SERIAL_PRINTLN("Failed to detect CC3000.  Check wiring?");
+      for (;;);
+    }
+  }
+
+  // 2. The master asserts nCS.
+  digitalWrite(CC3K_CS_PIN, LOW);
+
+  // 3. The master introduces a delay of at least 50 μs before starting actual transmission of data.
+  delay(50);
+
+  // 4. The master transmits the first 4 bytes of the SPI header.
+  hci_pad = (argsSize & 1) == 0;
+  hci_payload_size = 4 + argsSize + hci_pad;
+  hci_transfer(HCI_WRITE);
+  hci_transfer(hci_payload_size >> 8);
+  hci_transfer(hci_payload_size & 0xff);
+  hci_transfer(0);
+
+  // 5. The master introduces a delay of at least an additional 50 μs.
+  delay(50);
+
+  // 6. The master transmits the rest of the packet.
+  hci_transfer(0);
+  hci_transfer(HCI_TYPE_CMND);
+  hci_transfer(opcode & 0xff);
+  hci_transfer(opcode >> 8);
+  hci_transfer(argsSize);
+}
+
+//
+// hci_begin_command
+//
+// Sends the headers for a given command opcode.
+//
+HCI_ATTR 
+void hci_begin_command(uint16_t opcode, uint16_t argsSize)
+{ 
+  DEBUG_LV3(SERIAL_PRINTFUNCTION());
+
+  // Generic Host Write Operation
+  hci_state = HCI_STATE_WAIT_ASSERT;
+
+  // 1. The master asserts nCS (that is, drives the signal low) and waits for IRQ assertion.
+  digitalWrite(CC3K_CS_PIN, LOW);
+
+  // 2. The CC3000 device asserts IRQ when ready to receive the data.
+  while (hci_state != HCI_STATE_IDLE)
+    ;
+
+  // 3. The master starts the write transaction. The write transaction consists of a 5-byte header
+  //    followed by the payload and a padding byte (if required: remember, the total packet length
+  //    must be 16-bit aligned).
+  hci_pad = (argsSize & 1) == 0;
+  hci_payload_size = 4 + argsSize + hci_pad;
+  hci_transfer(HCI_WRITE);
+  hci_transfer(hci_payload_size >> 8);
+  hci_transfer(hci_payload_size & 0xff);
+  hci_transfer(0);
+  hci_transfer(0);
+
+  hci_transfer(HCI_TYPE_CMND);
+  hci_transfer(opcode & 0xff);
+  hci_transfer(opcode >> 8);
+  hci_transfer(argsSize);
+}
+
+//
+// hci_end_command_begin_receive
+//
+// Finishes sending a command and also prepares to wait for its response event.
+//
+// These are done as a functional unit to ensure we are prepared for the event interrupt
+// before we finalize sending the command.
+//
+HCI_ATTR 
+void hci_end_command_begin_receive(uint16_t event)
 {
-  DEBUG_LV3(
-    SERIAL_PRINTFUNCTION();
-    SERIAL_PRINTVAR(hci_payload_size);
-    )
+  hci_pending_event = event;
+  hci_pending_event_available = 0;
+  hci_data_available = 0;
 
-  // Read and discard any unread portion of the message.
-  while (hci_payload_size)
-    hci_read_u8();
+  if (hci_pad)
+    hci_transfer(0);
 
-  // 5. At the end of read transaction, the master drives nCS inactive.
+  // 4. After the last byte of data, the nCS is deasserted by the master.
   digitalWrite(CC3K_CS_PIN, HIGH);
 
-  // 6. The CC3000 device deasserts an IRQ line.
-  while (digitalRead(CC3K_IRQ_PIN) == LOW)
+  // 5. The CC3000 device deasserts the IRQ line.
+
+  while (!hci_pending_event_available)
     ;
 }
 
+//
+// hci_begin_data
+//
+// Sends the headers for a given data opcode.
+//
 HCI_ATTR 
-void hci_wait_data()
+void hci_begin_data(uint16_t opcode, uint8_t argsSize, uint16_t bufferSize)
+{ 
+  DEBUG_LV3(SERIAL_PRINTFUNCTION());
+
+  // Generic Host Write Operation
+
+  // 1. The master asserts nCS (that is, drives the signal low) and waits for IRQ assertion.
+  hci_state = HCI_STATE_WAIT_ASSERT;
+
+  digitalWrite(CC3K_CS_PIN, LOW);
+
+  // 2. The CC3000 device asserts IRQ when ready to receive the data.
+  while (hci_state != HCI_STATE_IDLE)
+    ;
+
+  // 3. The master starts the write transaction. The write transaction consists of a 5-byte header
+  //    followed by the payload and a padding byte (if required: remember, the total packet length
+  //    must be 16-bit aligned).
+  int totalSize = argsSize + bufferSize;
+  hci_pad = (totalSize & 1) != 0;
+  hci_payload_size = 4 + totalSize + hci_pad;
+  hci_transfer(HCI_WRITE);
+  hci_transfer(hci_payload_size >> 8);
+  hci_transfer(hci_payload_size);
+  hci_transfer(0);
+  hci_transfer(0);
+
+  hci_transfer(HCI_TYPE_DATA);
+  hci_transfer(opcode);
+  hci_transfer(argsSize);
+  hci_transfer(totalSize);
+  hci_transfer(totalSize >> 8);
+}
+
+#define hci_end_data_begin_receive hci_end_command_begin_receive
+
+//
+// hci_wait_data
+//
+// Waits for the interrupt handler to begin receiving an expected data message.
+// See recv for known issues regarding client drops.
+//
+HCI_ATTR 
+void hci_wait_data(void)
 {
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
 
@@ -576,13 +621,24 @@ void hci_wait_data()
     ;
 }
 
+//
+// hci_read_status
+//
+// Reads the status byte which is a common feature in most event messages.  
+// As the status byte is not returned via the API, it is discarded.
+//
 HCI_ATTR 
-void hci_read_status()
+void hci_read_status(void)
 {
   int status = hci_read_u8();
   DEBUG_LV2(SERIAL_PRINTVAR(status));
 }
 
+//
+// hci_end_command_receive_u32_result
+//
+// Implements a common pattern for retrieving the results of commands.
+//
 HCI_ATTR 
 uint32_t hci_end_command_receive_u32_result(uint16_t event)
 {
@@ -591,24 +647,22 @@ uint32_t hci_end_command_receive_u32_result(uint16_t event)
   hci_read_status();
 
   uint32_t result = hci_read_u32_le();
-  DEBUG_LV3(SERIAL_PRINTVAR(result));
+  DEBUG_LV2(SERIAL_PRINTVAR(result));
 
   hci_end_receive();
 
   return result;
 }
 
-void wifi_init(void)
+void wlan_init(void)
 { 
-  DEBUG_LV1(SERIAL_PRINTFUNCTION());
-  delay(1000);
+  DEBUG_LV2(SERIAL_PRINTFUNCTION());
 
   pinMode(CC3K_EN_PIN, OUTPUT);
   digitalWrite(CC3K_EN_PIN, LOW);
   delay(500);
 
   pinMode(CC3K_CS_PIN, OUTPUT);
-
   pinMode(CC3K_IRQ_PIN, INPUT_PULLUP);
   
   digitalWrite(CC3K_CS_PIN, HIGH);
@@ -630,11 +684,11 @@ void wifi_init(void)
   hci_begin_command(HCI_CMND_READ_BUFFER_SIZE, 0);
   hci_end_command_begin_receive(HCI_CMND_READ_BUFFER_SIZE);
   hci_read_status();
-  buffer_count = hci_read_u8();
-  avail_buffer_count = buffer_count;
-  DEBUG_LV2(SERIAL_PRINTVAR(buffer_count));
-  buffer_size = hci_read_u16_le();
-  DEBUG_LV2(SERIAL_PRINTVAR(buffer_size));
+  hci_buffer_count = hci_read_u8();
+  hci_available_buffer_count = hci_buffer_count;
+  DEBUG_LV2(SERIAL_PRINTVAR(hci_buffer_count));
+  hci_buffer_size = hci_read_u16_le();
+  DEBUG_LV2(SERIAL_PRINTVAR(hci_buffer_size));
   hci_end_receive();
 
   hci_begin_command(HCI_CMND_EVENT_MASK, 4);
@@ -715,7 +769,7 @@ int32_t wlan_connect(unsigned long sec_type, const char *ssid, long ssid_len, un
     hci_write_array(bssid, 6);
   else
     hci_write_array(bssid_zero, 6);
-  hci_write_array((uint8_t*)ssid, ssid_len);
+  hci_write_array(ssid, ssid_len);
   if (key_len && key)
     hci_write_array(key, key_len);
 
@@ -739,7 +793,7 @@ int setsockopt(long sd, long level, long optname, const void *optval, unsigned l
   hci_write_u32_le(optname);
   hci_write_u32_le(8);
   hci_write_u32_le(optlen);
-  hci_write_array(((uint8_t *)optval), optlen);
+  hci_write_array(optval, optlen);
 
   return hci_end_command_receive_u32_result(HCI_CMND_SETSOCKOPT);
 }
@@ -791,7 +845,7 @@ int bind(int sd, struct _sockaddr_t *addr, int addrlen)
   hci_write_u32_le(sd);
   hci_write_u32_le(0x8);
   hci_write_u32_le(addrlen);
-  hci_write_array(((uint8_t *)addr), 8);
+  hci_write_array(addr, 8);
 
   return hci_end_command_receive_u32_result(HCI_CMND_BIND);
 }
@@ -876,12 +930,6 @@ int recv(int sd, uint8_t *buffer, int size, int flags)
       buffer[i] = hci_read_u8();
 
     hci_end_receive();
-
-    if (return_length < size)
-    {
-      buffer[return_length] = 0;
-      DEBUG_LV2(SERIAL_PRINTVAR((char*)buffer));
-    }
   }
 
   return return_length;
@@ -896,10 +944,10 @@ int send(int sd, uint8_t *buffer, int size, int flags)
     SERIAL_PRINTVAR(flags);
     )
 
-  DEBUG_LV3(SERIAL_PRINTVAR(avail_buffer_count));
-  while (avail_buffer_count == 0)
+  DEBUG_LV3(SERIAL_PRINTVAR(hci_available_buffer_count));
+  while (hci_available_buffer_count == 0)
     ;
-  avail_buffer_count--;
+  hci_available_buffer_count--;
   
   hci_begin_data(HCI_CMND_SEND, 16, size);
   hci_write_u32_le(sd);
@@ -907,6 +955,7 @@ int send(int sd, uint8_t *buffer, int size, int flags)
   hci_write_u32_le(size);
   hci_write_u32_le(flags);
   hci_write_array(buffer, size);
+
   hci_end_data_begin_receive(HCI_EVNT_SEND);
   hci_end_receive();
 
@@ -920,7 +969,7 @@ int closesocket(int sd)
     SERIAL_PRINTVAR(sd);
     )
   
-  while (avail_buffer_count != buffer_count)
+  while (hci_available_buffer_count != hci_buffer_count)
     ;
     
   hci_begin_command(HCI_CMND_CLOSE_SOCKET, 4);
@@ -945,7 +994,7 @@ int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned
   hci_write_u32_le(mdnsEnabled);
   hci_write_u32_le(8);
   hci_write_u32_le(deviceServiceNameLength);
-  hci_write_array((uint8_t*)deviceServiceName, deviceServiceNameLength);
+  hci_write_array(deviceServiceName, deviceServiceNameLength);
 
   return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
 }

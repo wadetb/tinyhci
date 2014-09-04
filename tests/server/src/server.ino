@@ -13,6 +13,8 @@ uint8_t recv_buf[256];
 uint8_t recv_buf_idx = 0;
 int recv_buf_avail = 0;
 
+int16_t listen_socket;
+
 void wifi_connect(void)
 {
   wlan_ioctl_set_connection_policy(false, false, false);
@@ -191,7 +193,7 @@ fail:;
 
 void setup()
 {
-  wifi_init();
+  wlan_init();
   wifi_connect();
   wifi_listen();  
 }
