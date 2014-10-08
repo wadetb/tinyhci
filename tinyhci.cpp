@@ -22,6 +22,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 #include <SPI.h>
 #include "tinyhci.h"
 
+#define USE_WATCHDOG 1
+
+#if USE_WATCHDOG
+#include <avr/wdt.h>
+#else
+#define wdt_reset()
+#endif
+
 //
 // Redefine these based on your particular hardware.
 //
@@ -88,6 +96,7 @@ static volatile uint8_t hci_state;
 #define HCI_CMND_ACCEPT                         0x1005
 #define HCI_CMND_LISTEN                         0x1006
 #define HCI_CMND_CONNECT                        0x1007
+#define HCI_CMND_SELECT                         0x1008
 #define HCI_CMND_SETSOCKOPT                     0x1009
 #define HCI_CMND_CLOSE_SOCKET                   0x100B
 #define HCI_CMND_MDNS_ADVERTISE                 0x1011
@@ -291,8 +300,9 @@ void hci_end_receive(void)
   digitalWrite(CC3K_CS_PIN, HIGH);
 
   // 6. The CC3000 device deasserts an IRQ line.
+  wdt_reset();
   while (digitalRead(CC3K_IRQ_PIN) == LOW)
-    ;
+    ; // intentionally no wdt_reset()
 }
 
 //
@@ -473,6 +483,7 @@ void hci_begin_first_command(uint16_t opcode, uint16_t argsSize)
       SERIAL_PRINTLN("Failed to detect CC3000.  Check wiring?");
       for (;;);
     }
+    wdt_reset();
   }
 
   // 2. The master asserts nCS.
@@ -517,8 +528,9 @@ void hci_begin_command(uint16_t opcode, uint16_t argsSize)
   digitalWrite(CC3K_CS_PIN, LOW);
 
   // 2. The CC3000 device asserts IRQ when ready to receive the data.
+  wdt_reset();
   while (hci_state != HCI_STATE_IDLE)
-    ;
+    ; // intentionally no wdt_reset()
 
   // 3. The master starts the write transaction. The write transaction consists of a 5-byte header
   //    followed by the payload and a padding byte (if required: remember, the total packet length
@@ -560,8 +572,9 @@ void hci_end_command_begin_receive(uint16_t event)
 
   // 5. The CC3000 device deasserts the IRQ line.
 
+  wdt_reset();
   while (!hci_pending_event_available)
-    ;
+    ; // intentionally no wdt_reset().
 }
 
 //
@@ -582,8 +595,9 @@ void hci_begin_data(uint16_t opcode, uint8_t argsSize, uint16_t bufferSize)
   digitalWrite(CC3K_CS_PIN, LOW);
 
   // 2. The CC3000 device asserts IRQ when ready to receive the data.
+  wdt_reset();
   while (hci_state != HCI_STATE_IDLE)
-    ;
+    ; // intentionally no wdt_reset().
 
   // 3. The master starts the write transaction. The write transaction consists of a 5-byte header
   //    followed by the payload and a padding byte (if required: remember, the total packet length
@@ -617,8 +631,9 @@ void hci_wait_data(void)
 {
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
 
+  wdt_reset();
   while (!hci_data_available)
-    ;
+    ; // intentionally no wdt_reset()
 }
 
 //
@@ -884,7 +899,7 @@ int accept(int sd, struct sockaddr_t *addr, unsigned long *addrlen)
   return return_status;
 }
 
-int recv(int sd, uint8_t *buffer, int size, int flags)
+int recv(int sd, void *buffer, int size, int flags)
 {
   DEBUG_LV2(
     SERIAL_PRINTFUNCTION();
@@ -927,7 +942,7 @@ int recv(int sd, uint8_t *buffer, int size, int flags)
       return_length = size;
 
     for (int i = 0; i < return_length; i++)
-      buffer[i] = hci_read_u8();
+      ((uint8_t*)buffer)[i] = hci_read_u8();
 
     hci_end_receive();
   }
@@ -935,7 +950,7 @@ int recv(int sd, uint8_t *buffer, int size, int flags)
   return return_length;
 }
 
-int send(int sd, uint8_t *buffer, int size, int flags)
+int send(int sd, const void *buffer, int size, int flags)
 {
   DEBUG_LV2(
     SERIAL_PRINTFUNCTION();
@@ -945,8 +960,9 @@ int send(int sd, uint8_t *buffer, int size, int flags)
     )
 
   DEBUG_LV3(SERIAL_PRINTVAR(hci_available_buffer_count));
+  wdt_reset();
   while (hci_available_buffer_count == 0)
-    ;
+    ; // intentionally no wdt_reset()
   hci_available_buffer_count--;
   
   hci_begin_data(HCI_CMND_SEND, 16, size);
@@ -969,13 +985,68 @@ int closesocket(int sd)
     SERIAL_PRINTVAR(sd);
     )
   
+  wdt_reset();
   while (hci_available_buffer_count != hci_buffer_count)
-    ;
+    ; // intentionally no wdt_reset()
     
   hci_begin_command(HCI_CMND_CLOSE_SOCKET, 4);
   hci_write_u32_le(sd);
 
   return hci_end_command_receive_u32_result(HCI_CMND_CLOSE_SOCKET);
+}
+
+int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, timeval *timeout)
+{
+  DEBUG_LV2(
+    SERIAL_PRINTFUNCTION();
+    SERIAL_PRINTVAR(nfds);
+    )
+
+  hci_begin_command(HCI_CMND_SELECT, 44);
+  hci_write_u32_le(nfds);
+  hci_write_u32_le(0x14);
+  hci_write_u32_le(0x14);
+  hci_write_u32_le(0x14);
+  hci_write_u32_le(0x14);
+  hci_write_u32_le(timeout != NULL);
+  hci_write_u32_le(((readsds) ? *(unsigned long*)readsds : 0));
+  hci_write_u32_le(((writesds) ? *(unsigned long*)writesds : 0));
+  hci_write_u32_le(((exceptsds) ? *(unsigned long*)exceptsds : 0));
+  if (timeout)
+  {
+    if (timeout->tv_sec == 0 && timeout->tv_usec < 5000)
+      timeout->tv_usec = 5000;
+    hci_write_u32_le(timeout->tv_sec);
+    hci_write_u32_le(timeout->tv_usec);
+  }
+  else
+  {
+    hci_write_u32_le(0);
+    hci_write_u32_le(0);    
+  }
+
+  hci_end_command_begin_receive(HCI_CMND_SELECT);
+
+  hci_read_status();
+
+  int32_t return_status = hci_read_u32_le();
+  DEBUG_LV2(SERIAL_PRINTVAR(return_status));
+  
+  uint32_t rdfd = hci_read_u32_le();
+  DEBUG_LV2(SERIAL_PRINTVAR(rdfd));
+  if (readsds) *(uint32_t*)readsds = rdfd;
+    
+  uint32_t wrfd = hci_read_u32_le();
+  DEBUG_LV2(SERIAL_PRINTVAR(wrfd));
+  if (writesds) *(uint32_t*)writesds = wrfd;
+
+  uint32_t exfd = hci_read_u32_le();
+  DEBUG_LV2(SERIAL_PRINTVAR(exfd));
+  if (exceptsds) *(uint32_t*)exceptsds = exfd;
+
+  hci_end_receive();
+
+  return return_status;
 }
 
 int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned short deviceServiceNameLength)

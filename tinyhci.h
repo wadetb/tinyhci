@@ -64,7 +64,84 @@ typedef struct _sockaddr_in_t
     uint8_t          sin_zero[8];           // zero this if you want to
 } sockaddr_in;
 
+typedef unsigned long socklen_t;
+
+#ifdef __AVR__
+typedef unsigned long time_t;  /* KTown: Updated to be compatible with Arduino Time.h */
+#else
+typedef long time_t;
+#endif
+
+typedef long suseconds_t;
+
+typedef struct _timeval_t 
+{
+    time_t         tv_sec;                  /* seconds */
+    suseconds_t    tv_usec;                 /* microseconds */
+} timeval;
+
+// The fd_set member is required to be an array of longs.
+typedef long int __fd_mask;
+
+#define __FD_SETSIZE            32
+
+// It's easier to assume 8-bit bytes than to get CHAR_BIT.
+#define __NFDBITS               (8 * sizeof (__fd_mask))
+#define __FDELT(d)              ((d) / __NFDBITS)
+#define __FDMASK(d)             ((__fd_mask) 1 << ((d) % __NFDBITS))
+
+#ifdef fd_set
+#undef fd_set  // for compatibility with newlib, which defines fd_set
+#endif
+
+// fd_set for select and pselect.
+typedef struct
+{
+    __fd_mask fds_bits[__FD_SETSIZE / __NFDBITS];
+#define __FDS_BITS(set)        ((set)->fds_bits)
+} fd_set;
+
+// We don't use `memset' because this would require a prototype and
+//   the array isn't too big.
+#define __FD_ZERO(set)                               \
+  do {                                                \
+    unsigned int __i;                                 \
+    fd_set *__arr = (set);                            \
+    for (__i = 0; __i < sizeof (fd_set) / sizeof (__fd_mask); ++__i) \
+      __FDS_BITS (__arr)[__i] = 0;                    \
+  } while (0)
+#define __FD_SET(d, set)       (__FDS_BITS (set)[__FDELT (d)] |= __FDMASK (d))
+#define __FD_CLR(d, set)       (__FDS_BITS (set)[__FDELT (d)] &= ~__FDMASK (d))
+#define __FD_ISSET(d, set)     (__FDS_BITS (set)[__FDELT (d)] & __FDMASK (d))
+
+// Access macros for 'fd_set'.
+#ifdef FD_SET
+#undef FD_SET
+#endif
+#ifdef FD_CLR
+#undef FD_CLR
+#endif
+#ifdef FD_ISSET
+#undef FD_ISSET
+#endif
+#ifdef FD_ZERO
+#undef FD_ZERO
+#endif
+#define FD_SET(fd, fdsetp)      __FD_SET (fd, fdsetp)
+#define FD_CLR(fd, fdsetp)      __FD_CLR (fd, fdsetp)
+#define FD_ISSET(fd, fdsetp)    __FD_ISSET (fd, fdsetp)
+#define FD_ZERO(fdsetp)         __FD_ZERO (fdsetp)
+
 #define htons(a) ((((uint16_t)(a) & 0xff00) >> 8) | (((uint16_t)(a) & 0x00ff) << 8))
+
+#define ntohs                   htons
+
+#define htonl(A)    ((((unsigned long)(A) & 0xff000000) >> 24) | \
+                     (((unsigned long)(A) & 0x00ff0000) >> 8) | \
+                     (((unsigned long)(A) & 0x0000ff00) << 8) | \
+                     (((unsigned long)(A) & 0x000000ff) << 24))
+
+#define ntohl                   htonl
 
 #define MDNS_DEVICE_SERVICE_MAX_LENGTH  32
 #define MAXIMAL_SSID_LENGTH             32
@@ -108,8 +185,9 @@ int socket(long domain, long type, long protocol);
 int listen(int sd, int backlog);
 int bind(int sd, struct _sockaddr_t *addr, int addrlen);
 int accept(int sd, struct sockaddr_t *addr, unsigned long *addrlen);
-int recv(int sd, uint8_t *buffer, int size, int flags);
-int send(int sd, uint8_t *buffer, int size, int flags);
+int recv(int sd, void *buffer, int size, int flags);
+int send(int sd, const void *buffer, int size, int flags);
+int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, timeval *timeout);
 int closesocket(int sd);
 int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned short deviceServiceNameLength);
 
