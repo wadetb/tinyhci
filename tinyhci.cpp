@@ -30,6 +30,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 #define wdt_reset()
 #endif
 
+// Quick debug
+#define lSer    Serial1
+
 //
 // Define the fw version of the CC3000 module you are running against.
 //
@@ -170,7 +173,7 @@ uint16_t hci_read_u16_le(void)
 {
   uint8_t b0 = hci_read_u8();
   uint8_t b1 = hci_read_u8();
-  return b0 | (b1 << 8);
+  return (uint16_t)b0 | ((uint16_t)b1 << 8);
 }
 
 HCI_ATTR
@@ -180,7 +183,9 @@ uint32_t hci_read_u32_le(void)
   uint8_t b1 = hci_read_u8();
   uint8_t b2 = hci_read_u8();
   uint8_t b3 = hci_read_u8();
-  return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+
+  return (uint32_t)b0 | ((uint32_t)b1 << 8) |
+          ((uint32_t)b2 << 16) | ((uint32_t)b3 << 24);
 }
 
 HCI_ATTR
@@ -1040,7 +1045,12 @@ int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, time
   return return_status;
 }
 
-int gethostbyname(char *url, unsigned short urlLength, unsigned long *ip)
+int connect(long sd, const sockaddr *addr, long addrlen)
+{
+  return 0;
+}
+
+int gethostbyname(char *hostname, unsigned short hnLength, uint32_t *ip)
 {
   DEBUG_LV2(
     SERIAL_PRINTFUNCTION();
@@ -1049,9 +1059,24 @@ int gethostbyname(char *url, unsigned short urlLength, unsigned long *ip)
     SERIAL_PRINTVAR(ip);
     )
 
-  hci_begin_command(HCI_CMND_GETHOSTNAME , 8 + urlLength);
+  // Sanity checks
+  if (!hostname || !hnLength || hnLength > HOSTNAME_MAX_LENGTH)
+    return EFAIL;
 
-  return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
+  // Send command
+  hci_begin_command(HCI_CMND_GETHOSTNAME , 8 + hnLength);
+  hci_write_u32_le(0x08);
+  hci_write_u32_le(hnLength);
+  hci_write_array(hostname, hnLength);
+  hci_end_command_begin_receive(HCI_CMND_GETHOSTNAME);
+
+  // Get result
+  hci_read_status();
+  uint32_t return_status = hci_read_u32_le();
+  *ip = hci_read_u32_le();
+  hci_end_receive();
+
+  return return_status;
 }
 
 //
