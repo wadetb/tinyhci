@@ -39,11 +39,24 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //
 // Serial port helper macros.
 //
-#define SERIAL_PRINT(x)            Serial.print(x); Serial.flush()
-#define SERIAL_PRINTLN(x)          Serial.println(x); Serial.flush()
-#define SERIAL_PRINTFUNCTION()     Serial.print("==> "); Serial.print(__FUNCTION__); Serial.println(" <=="); Serial.flush()
-#define SERIAL_PRINTVAR(x)         Serial.print(#x ": "); Serial.println(x); Serial.flush()
-#define SERIAL_PRINTVAR_HEX(x)     Serial.print(#x ": "); Serial.println(x, HEX); Serial.flush()
+#define SERIAL_PORT                Serial1
+#define SERIAL_PRINT(x)            SERIAL_PORT.print(x); SERIAL_PORT.flush()
+#define SERIAL_PRINTLN(x)          SERIAL_PORT.println(x); SERIAL_PORT.flush()
+#define SERIAL_PRINTFUNCTION()     SERIAL_PORT.print("==> "); SERIAL_PORT.print(__FUNCTION__); SERIAL_PORT.println(" <=="); SERIAL_PORT.flush()
+#define SERIAL_PRINTVAR(x)         SERIAL_PORT.print(#x ": "); SERIAL_PORT.println(x); SERIAL_PORT.flush()
+#define SERIAL_PRINTVAR_HEX(x)     SERIAL_PORT.print(#x ": "); SERIAL_PORT.println(x, HEX); SERIAL_PORT.flush()
+
+//
+// HCI Event IDs
+//
+#define HCI_EVNT_SEND                           0x1003
+#define HCI_EVNT_DATA_UNSOL_FREE_BUFF           0x4100
+#define HCI_EVNT_WLAN_UNSOL_CONNECT             0x8001
+#define HCI_EVNT_WLAN_UNSOL_DISCONNECT          0x8002
+#define HCI_EVNT_WLAN_UNSOL_INIT                0x8004
+#define HCI_EVNT_WLAN_UNSOL_DHCP                0x8010
+#define HCI_EVNT_WLAN_KEEPALIVE                 0x8200
+#define HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT      0x8800
 
 typedef struct _in_addr_t
 {
@@ -190,5 +203,6 @@ int send(int sd, const void *buffer, int size, int flags);
 int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, timeval *timeout);
 int closesocket(int sd);
 int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned short deviceServiceNameLength);
+int gethostbyname(char *url, unsigned short len, unsigned long *ip);
 
 #endif

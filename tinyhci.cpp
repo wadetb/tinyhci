@@ -33,10 +33,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //
 // Redefine these based on your particular hardware.
 //
-#define CC3K_CS_PIN    6
-#define CC3K_IRQ_PIN   7
-#define CC3K_EN_PIN    8
-#define CC3K_IRQ_NUM   4
+#define CC3K_CS_PIN    10
+#define CC3K_IRQ_PIN   3
+#define CC3K_EN_PIN    7
+#define CC3K_IRQ_NUM   1
 
 // 
 // Global variables
@@ -44,8 +44,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 volatile uint8_t wifi_connected = 0;
 volatile uint8_t wifi_dhcp = 0;
 volatile uint8_t ip_addr[4];
-
-volatile int16_t client_socket = -1;
 
 //
 // Static variables
@@ -99,26 +97,13 @@ static volatile uint8_t hci_state;
 #define HCI_CMND_SELECT                         0x1008
 #define HCI_CMND_SETSOCKOPT                     0x1009
 #define HCI_CMND_CLOSE_SOCKET                   0x100B
+#define HCI_CMND_GETHOSTNAME                    0x1010
 #define HCI_CMND_MDNS_ADVERTISE                 0x1011
 
 #define HCI_NETAPP_SET_TIMERS                   0x2009
 
 #define HCI_CMND_SIMPLE_LINK_START              0x4000
 #define HCI_CMND_READ_BUFFER_SIZE               0x400B
-
-//
-// HCI Event IDs
-//
-#define HCI_EVNT_SEND                           0x1003
-
-#define HCI_EVNT_DATA_UNSOL_FREE_BUFF           0x4100
-
-#define HCI_EVNT_WLAN_UNSOL_CONNECT             0x8001
-#define HCI_EVNT_WLAN_UNSOL_DISCONNECT          0x8002
-#define HCI_EVNT_WLAN_UNSOL_INIT                0x8004
-#define HCI_EVNT_WLAN_UNSOL_DHCP                0x8010
-#define HCI_EVNT_WLAN_KEEPALIVE                 0x8200
-#define HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT      0x8800
 
 //
 // HCI Data commands
@@ -134,6 +119,7 @@ static volatile uint8_t hci_state;
 
 #define HCI_ATTR __attribute__((noinline))
 
+void wifi_callback(uint16_t event);
 // 
 // hci_transfer
 //
@@ -359,8 +345,8 @@ void hci_dispatch_event(void)
       break;
 
     case HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT:
-      client_socket = -1;
       DEBUG_LV3(SERIAL_PRINTVAR(client_socket));
+      wifi_callback(rx_event_type);
       break;
     
     case HCI_EVNT_DATA_UNSOL_FREE_BUFF:
@@ -1066,6 +1052,19 @@ int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned
   hci_write_u32_le(8);
   hci_write_u32_le(deviceServiceNameLength);
   hci_write_array(deviceServiceName, deviceServiceNameLength);
+  return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
+}
+
+int gethostbyname(char *url, unsigned short urlLength, unsigned long *ip)
+{
+  DEBUG_LV2(
+    SERIAL_PRINTFUNCTION();
+    SERIAL_PRINTVAR(url);
+    SERIAL_PRINTVAR(len);
+    SERIAL_PRINTVAR(ip);
+    )
+
+  hci_begin_command(HCI_CMND_GETHOSTNAME , 8 + urlLength);
 
   return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
 }
