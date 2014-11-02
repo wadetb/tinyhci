@@ -3,19 +3,19 @@ All of tinyhci is licensed under the MIT license.
 
 Copyright (c) 2014 by Wade Brainerd <wadeb@wadeb.com>
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software 
-and associated documentation files (the "Software"), to deal in the Software without restriction, 
-including without limitation the rights to use, copy, modify, merge, publish, distribute, 
-sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is 
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+and associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all copies or 
+The above copyright notice and this permission notice shall be included in all copies or
 substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING 
-BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, 
-DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, 
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 #include <Arduino.h>
@@ -31,14 +31,19 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 #endif
 
 //
+// Define the fw version of the CC3000 module you are running against.
+//
+#define CC3000_FW_VERSION         132
+
+//
 // Redefine these based on your particular hardware.
 //
-#define CC3K_CS_PIN    10
-#define CC3K_IRQ_PIN   3
-#define CC3K_EN_PIN    7
-#define CC3K_IRQ_NUM   1
+#define CC3K_CS_PIN               10
+#define CC3K_IRQ_PIN              3
+#define CC3K_EN_PIN               7
+#define CC3K_IRQ_NUM              1
 
-// 
+//
 // Global variables
 //
 volatile uint8_t wifi_connected = 0;
@@ -59,14 +64,14 @@ static volatile uint8_t hci_available_buffer_count;
 static uint16_t hci_payload_size;
 static uint8_t hci_pad;
 
-#define HCI_STATE_IDLE          0
-#define HCI_STATE_WAIT_ASSERT   1
-
 static volatile uint8_t hci_state;
 
 //
 // HCI interface constants
 //
+#define HCI_STATE_IDLE                          0
+#define HCI_STATE_WAIT_ASSERT                   1
+
 #define HCI_READ                                0x3
 #define HCI_WRITE                               0x1
 
@@ -108,9 +113,9 @@ static volatile uint8_t hci_state;
 //
 // HCI Data commands
 //
-#define HCI_DATA_RECVFROM       0x84
-#define HCI_DATA_RECV           0x85
-#define HCI_DATA_NVMEM          0x91
+#define HCI_DATA_RECVFROM                       0x84
+#define HCI_DATA_RECV                           0x85
+#define HCI_DATA_NVMEM                          0x91
 
 //
 // HCI Command/Event argument constants
@@ -120,16 +125,16 @@ static volatile uint8_t hci_state;
 #define HCI_ATTR __attribute__((noinline))
 
 void wifi_callback(uint16_t event);
-// 
+//
 // hci_transfer
 //
 // Transfers one byte across HCI, the basis of all CC3000 communications.
 // Enable DEBUG_LV4 in tinyhci.h to watch the traffic via the serial port.
 //
-HCI_ATTR 
-uint8_t hci_transfer(uint8_t out) 
-{ 
-  uint8_t in = SPI.transfer(out); 
+HCI_ATTR
+uint8_t hci_transfer(uint8_t out)
+{
+  uint8_t in = SPI.transfer(out);
   DEBUG_LV4(
     Serial.print("SPI: ");
     Serial.print(out, HEX);
@@ -140,13 +145,13 @@ uint8_t hci_transfer(uint8_t out)
   return in;
 }
 
-// 
+//
 // Low level SPI reading functions for various data types.
 //
 // Note that these respect the payload size from the most recently read HCI header,
 //  and will not overrun it; preferring to return 0s instead.
 //
-HCI_ATTR 
+HCI_ATTR
 uint8_t hci_read_u8(void)
 {
   if (hci_payload_size > 0)
@@ -160,7 +165,7 @@ uint8_t hci_read_u8(void)
   }
 }
 
-HCI_ATTR 
+HCI_ATTR
 uint16_t hci_read_u16_le(void)
 {
   uint8_t b0 = hci_read_u8();
@@ -168,7 +173,7 @@ uint16_t hci_read_u16_le(void)
   return b0 | (b1 << 8);
 }
 
-HCI_ATTR 
+HCI_ATTR
 uint32_t hci_read_u32_le(void)
 {
   uint8_t b0 = hci_read_u8();
@@ -178,7 +183,7 @@ uint32_t hci_read_u32_le(void)
   return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
 }
 
-HCI_ATTR 
+HCI_ATTR
 void hci_read_array(uint8_t *data, uint16_t length)
 {
   while (length)
@@ -189,13 +194,13 @@ void hci_read_array(uint8_t *data, uint16_t length)
   }
 }
 
-// 
+//
 // Low level SPI writing functions for various data types.
 //
 // Note that these respect the payload size from the most recently written HCI header,
 //  and will not overrun it; sending nothing.
 //
-HCI_ATTR 
+HCI_ATTR
 uint8_t hci_write_u8(uint8_t v)
 {
   if (hci_payload_size > 0)
@@ -205,14 +210,14 @@ uint8_t hci_write_u8(uint8_t v)
   }
 }
 
-HCI_ATTR 
+HCI_ATTR
 void hci_write_u16_le(uint16_t v)
 {
   hci_write_u8((v >>  0) & 0xff);
   hci_write_u8((v >>  8) & 0xff);
 }
 
-HCI_ATTR 
+HCI_ATTR
 void hci_write_u32_le(uint32_t v)
 {
   hci_write_u8((v >>  0) & 0xff);
@@ -221,7 +226,7 @@ void hci_write_u32_le(uint32_t v)
   hci_write_u8((v >> 24) & 0xff);
 }
 
-HCI_ATTR 
+HCI_ATTR
 void hci_write_array(const void *data, uint16_t length)
 {
   const uint8_t *pos = (uint8_t*)data;
@@ -238,7 +243,7 @@ void hci_write_array(const void *data, uint16_t length)
 //
 // Reads the headers for an HCI event or data message, called by the interrupt handler.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_begin_receive(void)
 {
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
@@ -255,7 +260,7 @@ void hci_begin_receive(void)
   hci_transfer(0);
   hci_transfer(0);
 
-  // 4. The CC3000 sends back the following data: the first two bytes indicate the payload length 
+  // 4. The CC3000 sends back the following data: the first two bytes indicate the payload length
   //    and the data payload bytes follow, immediately after.
   uint8_t p0 = hci_transfer(0);
   uint8_t p1 = hci_transfer(0);
@@ -270,7 +275,7 @@ void hci_begin_receive(void)
 // Finishes reading the current event or data message, discarding any unread portion.
 // Called both inside and outside the interrupt handler.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_end_receive(void)
 {
   DEBUG_LV3(
@@ -294,7 +299,7 @@ void hci_end_receive(void)
 //
 // hci_dispatch_event
 //
-// This is the main incoming event handler, called by the interrupt handler.  
+// This is the main incoming event handler, called by the interrupt handler.
 // It has three different modes of operation, depending on the event type.
 //
 // If we are waiting for the CC3000 to respond to a command with a specific event (hci_pending_event),
@@ -305,7 +310,7 @@ void hci_end_receive(void)
 //
 // If it's neither type, we discard all of the event contents.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_dispatch_event(void)
 {
   uint16_t rx_event_type = hci_read_u16_le();
@@ -326,14 +331,14 @@ void hci_dispatch_event(void)
       wifi_connected = 1;
       DEBUG_LV3(SERIAL_PRINTVAR(wifi_connected));
       break;
-    
+
     case HCI_EVNT_WLAN_UNSOL_DISCONNECT:
       wifi_connected = 0;
       wifi_dhcp = 0;
       DEBUG_LV3(SERIAL_PRINTVAR(wifi_connected));
       DEBUG_LV3(SERIAL_PRINTVAR(wifi_dhcp));
       break;
-    
+
     case HCI_EVNT_WLAN_UNSOL_DHCP:
       wifi_dhcp = 1;
       DEBUG_LV3(SERIAL_PRINTVAR(wifi_dhcp));
@@ -348,7 +353,7 @@ void hci_dispatch_event(void)
       DEBUG_LV3(SERIAL_PRINTVAR(client_socket));
       wifi_callback(rx_event_type);
       break;
-    
+
     case HCI_EVNT_DATA_UNSOL_FREE_BUFF:
       {
         hci_read_u8(); // status
@@ -361,7 +366,7 @@ void hci_dispatch_event(void)
         DEBUG_LV3(SERIAL_PRINTVAR(hci_available_buffer_count));
       }
       break;
-    
+
     default:
       break;
     }
@@ -379,7 +384,7 @@ void hci_dispatch_event(void)
 //
 // Known issue: Unexpected data is currently not handled, see the implementation of recv.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_dispatch_data(void)
 {
   uint8_t rx_data_type = hci_read_u8();
@@ -397,13 +402,13 @@ void hci_dispatch_data(void)
   hci_data_available = 1;
 }
 
-// 
+//
 // hci_dispatch
 //
-// Called by the interrupt handler to reads the incoming transmition type and dispatch 
-// it accordingly.  See hci_dispatch_event and hci_dispatch_data for details. 
+// Called by the interrupt handler to reads the incoming transmition type and dispatch
+// it accordingly.  See hci_dispatch_event and hci_dispatch_data for details.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_dispatch(void)
 {
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
@@ -417,20 +422,20 @@ void hci_dispatch(void)
     hci_dispatch_data();
 }
 
-// 
+//
 // Interrupt handler
 //
 // There are two modes for the interrupt handler: waiting for assertion and idle.
 //
 // Waiting for assertion is a special mode, wherein a function that is about to communicate
-// with the CC3000 enables the mode and then asserts the CS.  The response from the CC3000 is 
+// with the CC3000 enables the mode and then asserts the CS.  The response from the CC3000 is
 // to raise an interrupt, which we do not want to process.  Instead, we notify the function
 // that the expect interrupt has been received by restoring the state to idle.
 //
 // In idle mode, the interrupt handler reads the event handler and then dispatches it
 // according to its type.  See hci_dispatch for more information.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_irq(void)
 {
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
@@ -438,7 +443,7 @@ void hci_irq(void)
   {
     hci_state = HCI_STATE_IDLE;
   }
-  else 
+  else
   {
     hci_begin_receive();
     hci_dispatch();
@@ -451,15 +456,15 @@ void hci_irq(void)
 // Sends the headers for a given opcode, with special handling for the first command after
 // the CC3000 powers on.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_begin_first_command(uint16_t opcode, uint16_t argsSize)
-{ 
+{
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
 
   // First Host Write Operation
 
-  // 1. The master detects the IRQ line low: in this case the detection of IRQ low does not 
-  //    indicate the intention of the CC3000 device to communicate with the master but rather 
+  // 1. The master detects the IRQ line low: in this case the detection of IRQ low does not
+  //    indicate the intention of the CC3000 device to communicate with the master but rather
   //    CC3000 readiness after power up.
   uint16_t start = millis();
   while (digitalRead(CC3K_IRQ_PIN) != LOW)
@@ -502,9 +507,9 @@ void hci_begin_first_command(uint16_t opcode, uint16_t argsSize)
 //
 // Sends the headers for a given command opcode.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_begin_command(uint16_t opcode, uint16_t argsSize)
-{ 
+{
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
 
   // Generic Host Write Operation
@@ -543,7 +548,7 @@ void hci_begin_command(uint16_t opcode, uint16_t argsSize)
 // These are done as a functional unit to ensure we are prepared for the event interrupt
 // before we finalize sending the command.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_end_command_begin_receive(uint16_t event)
 {
   hci_pending_event = event;
@@ -568,9 +573,9 @@ void hci_end_command_begin_receive(uint16_t event)
 //
 // Sends the headers for a given data opcode.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_begin_data(uint16_t opcode, uint8_t argsSize, uint16_t bufferSize)
-{ 
+{
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
 
   // Generic Host Write Operation
@@ -612,7 +617,7 @@ void hci_begin_data(uint16_t opcode, uint8_t argsSize, uint16_t bufferSize)
 // Waits for the interrupt handler to begin receiving an expected data message.
 // See recv for known issues regarding client drops.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_wait_data(void)
 {
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
@@ -625,10 +630,10 @@ void hci_wait_data(void)
 //
 // hci_read_status
 //
-// Reads the status byte which is a common feature in most event messages.  
+// Reads the status byte which is a common feature in most event messages.
 // As the status byte is not returned via the API, it is discarded.
 //
-HCI_ATTR 
+HCI_ATTR
 void hci_read_status(void)
 {
   int status = hci_read_u8();
@@ -640,11 +645,11 @@ void hci_read_status(void)
 //
 // Implements a common pattern for retrieving the results of commands.
 //
-HCI_ATTR 
+HCI_ATTR
 uint32_t hci_end_command_receive_u32_result(uint16_t event)
 {
   hci_end_command_begin_receive(event);
-  
+
   hci_read_status();
 
   uint32_t result = hci_read_u32_le();
@@ -656,7 +661,7 @@ uint32_t hci_end_command_receive_u32_result(uint16_t event)
 }
 
 void wlan_init(void)
-{ 
+{
   DEBUG_LV2(SERIAL_PRINTFUNCTION());
 
   pinMode(CC3K_EN_PIN, OUTPUT);
@@ -665,7 +670,7 @@ void wlan_init(void)
 
   pinMode(CC3K_CS_PIN, OUTPUT);
   pinMode(CC3K_IRQ_PIN, INPUT_PULLUP);
-  
+
   digitalWrite(CC3K_CS_PIN, HIGH);
   digitalWrite(CC3K_EN_PIN, HIGH);
   delay(100);
@@ -718,7 +723,7 @@ long netapp_timeout_values(unsigned long *aucDHCP, unsigned long *aucARP, unsign
   MIN_TIMER_SET(*aucARP)
   MIN_TIMER_SET(*aucKeepalive)
   MIN_TIMER_SET(*aucInactivity)
-  
+
   hci_begin_command(HCI_NETAPP_SET_TIMERS, 16);
   hci_write_u32_le(*aucDHCP);
   hci_write_u32_le(*aucARP);
@@ -787,7 +792,7 @@ int setsockopt(long sd, long level, long optname, const void *optval, unsigned l
     SERIAL_PRINTVAR_HEX((int)optval);
     SERIAL_PRINTVAR(optlen);
     )
-  
+
   hci_begin_command(HCI_CMND_SETSOCKOPT, 20 + optlen);
   hci_write_u32_le(sd);
   hci_write_u32_le(level);
@@ -823,7 +828,7 @@ int listen(int sd, int backlog)
     SERIAL_PRINTVAR(sd);
     SERIAL_PRINTVAR(backlog);
     )
-  
+
   hci_begin_command(HCI_CMND_LISTEN, 8);
   hci_write_u32_le(sd);
   hci_write_u32_le(backlog);
@@ -841,7 +846,7 @@ int bind(int sd, struct _sockaddr_t *addr, int addrlen)
     SERIAL_PRINTVAR(((_sockaddr_in_t*)addr)->sin_port);
     SERIAL_PRINTVAR_HEX(((_sockaddr_in_t*)addr)->sin_addr.s_addr);
     )
-  
+
   hci_begin_command(HCI_CMND_BIND, 20);
   hci_write_u32_le(sd);
   hci_write_u32_le(0x8);
@@ -857,7 +862,7 @@ int accept(int sd, struct sockaddr_t *addr, unsigned long *addrlen)
     SERIAL_PRINTFUNCTION();
     SERIAL_PRINTVAR(sd);
     )
-    
+
   hci_begin_command(HCI_CMND_ACCEPT, 4);
   hci_write_u32_le(sd);
 
@@ -873,7 +878,7 @@ int accept(int sd, struct sockaddr_t *addr, unsigned long *addrlen)
 
   if (addr)
     hci_read_array((uint8_t*)addr, 8);
-  if (addrlen) 
+  if (addrlen)
     *addrlen = 8;
 
   hci_end_receive();
@@ -893,14 +898,14 @@ int recv(int sd, void *buffer, int size, int flags)
     SERIAL_PRINTVAR(size);
     SERIAL_PRINTVAR(flags);
     )
-  
+
   hci_begin_command(HCI_CMND_RECV, 12);
   hci_write_u32_le(sd);
   hci_write_u32_le(size);
   hci_write_u32_le(flags);
 
   hci_end_command_begin_receive(HCI_CMND_RECV);
-  
+
   hci_read_status();
 
   long return_sd = hci_read_u32_le();
@@ -918,9 +923,9 @@ int recv(int sd, void *buffer, int size, int flags)
   {
     // TODO: while waiting for data, we need to handle unsolicited client drops
     //  and stop waiting.
-    // Also for safety, the interrupt handler should be able to ignore 
+    // Also for safety, the interrupt handler should be able to ignore
     //  unsolicited data when we're not waiting.
-    // Thus, the intention to wait for data must be indicated to hci_end_receive, 
+    // Thus, the intention to wait for data must be indicated to hci_end_receive,
     //  e.g. hci_end_receive_with_data.
     hci_wait_data();
 
@@ -950,7 +955,7 @@ int send(int sd, const void *buffer, int size, int flags)
   while (hci_available_buffer_count == 0)
     ; // intentionally no wdt_reset()
   hci_available_buffer_count--;
-  
+
   hci_begin_data(HCI_CMND_SEND, 16, size);
   hci_write_u32_le(sd);
   hci_write_u32_le(12);
@@ -970,11 +975,11 @@ int closesocket(int sd)
     SERIAL_PRINTFUNCTION();
     SERIAL_PRINTVAR(sd);
     )
-  
+
   wdt_reset();
   while (hci_available_buffer_count != hci_buffer_count)
     ; // intentionally no wdt_reset()
-    
+
   hci_begin_command(HCI_CMND_CLOSE_SOCKET, 4);
   hci_write_u32_le(sd);
 
@@ -1008,7 +1013,7 @@ int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, time
   else
   {
     hci_write_u32_le(0);
-    hci_write_u32_le(0);    
+    hci_write_u32_le(0);
   }
 
   hci_end_command_begin_receive(HCI_CMND_SELECT);
@@ -1017,11 +1022,11 @@ int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, time
 
   int32_t return_status = hci_read_u32_le();
   DEBUG_LV2(SERIAL_PRINTVAR(return_status));
-  
+
   uint32_t rdfd = hci_read_u32_le();
   DEBUG_LV2(SERIAL_PRINTVAR(rdfd));
   if (readsds) *(uint32_t*)readsds = rdfd;
-    
+
   uint32_t wrfd = hci_read_u32_le();
   DEBUG_LV2(SERIAL_PRINTVAR(wrfd));
   if (writesds) *(uint32_t*)writesds = wrfd;
@@ -1033,26 +1038,6 @@ int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, time
   hci_end_receive();
 
   return return_status;
-}
-
-int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned short deviceServiceNameLength)
-{
-  DEBUG_LV2(
-    SERIAL_PRINTFUNCTION();
-    SERIAL_PRINTVAR(mdnsEnabled);
-    SERIAL_PRINTVAR(deviceServiceName);
-    SERIAL_PRINTVAR(deviceServiceNameLength);
-    )
-
-  if (deviceServiceNameLength > MDNS_DEVICE_SERVICE_MAX_LENGTH)
-    return -1;
-    
-  hci_begin_command(HCI_CMND_MDNS_ADVERTISE, 12 + deviceServiceNameLength);
-  hci_write_u32_le(mdnsEnabled);
-  hci_write_u32_le(8);
-  hci_write_u32_le(deviceServiceNameLength);
-  hci_write_array(deviceServiceName, deviceServiceNameLength);
-  return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
 }
 
 int gethostbyname(char *url, unsigned short urlLength, unsigned long *ip)
@@ -1068,3 +1053,30 @@ int gethostbyname(char *url, unsigned short urlLength, unsigned long *ip)
 
   return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
 }
+
+//
+// From CC3000 fw version 1.32 and up the module does not longer
+// support the mdnsAdvertise command. Instead this has to be
+// implemented in software. This is why we check here for the fw
+// version.
+#if CC3000_FW_VERSION < 132
+int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned short deviceServiceNameLength)
+{
+  DEBUG_LV2(
+    SERIAL_PRINTFUNCTION();
+    SERIAL_PRINTVAR(mdnsEnabled);
+    SERIAL_PRINTVAR(deviceServiceName);
+    SERIAL_PRINTVAR(deviceServiceNameLength);
+    )
+
+  if (deviceServiceNameLength > MDNS_DEVICE_SERVICE_MAX_LENGTH)
+    return -1;
+
+  hci_begin_command(HCI_CMND_MDNS_ADVERTISE, 12 + deviceServiceNameLength);
+  hci_write_u32_le(mdnsEnabled);
+  hci_write_u32_le(8);
+  hci_write_u32_le(deviceServiceNameLength);
+  hci_write_array(deviceServiceName, deviceServiceNameLength);
+  return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
+}
+#endif
