@@ -30,8 +30,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 #define wdt_reset()
 #endif
 
-// Quick debug
-#define lSer    Serial1
 
 //
 // Define the fw version of the CC3000 module you are running against.
@@ -43,7 +41,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //
 #define CC3K_CS_PIN               10
 #define CC3K_IRQ_PIN              3
-#define CC3K_EN_PIN               7
+#define CC3K_EN_PIN               5
 #define CC3K_IRQ_NUM              1
 
 //
@@ -51,7 +49,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //
 volatile uint8_t wifi_connected = 0;
 volatile uint8_t wifi_dhcp = 0;
-volatile uint8_t ip_addr[4];
+volatile uint32_t ip_addr;
 
 //
 // Static variables
@@ -69,56 +67,7 @@ static uint8_t hci_pad;
 
 static volatile uint8_t hci_state;
 
-//
-// HCI interface constants
-//
-#define HCI_STATE_IDLE                          0
-#define HCI_STATE_WAIT_ASSERT                   1
-
-#define HCI_READ                                0x3
-#define HCI_WRITE                               0x1
-
-#define HCI_TYPE_CMND                           0x1
-#define HCI_TYPE_DATA                           0x2
-#define HCI_TYPE_PATCH                          0x3
-#define HCI_TYPE_EVNT                           0x4
-
-//
-// HCI Command IDs
-//
-#define HCI_CMND_WLAN_CONNECT                   0x0001
-#define HCI_CMND_WLAN_DISCONNECT                0x0002
-#define HCI_CMND_WLAN_IOCTL_SET_CONNECTION_POLICY 0x0004
-#define HCI_CMND_EVENT_MASK                     0x0008
-
-#define HCI_CMND_SEND                           0x0081
-#define HCI_CMND_SENDTO                         0x0083
-#define HCI_DATA_BSD_RECVFROM                   0x0084
-#define HCI_DATA_BSD_RECV                       0x0085
-
-#define HCI_CMND_SOCKET                         0x1001
-#define HCI_CMND_BIND                           0x1002
-#define HCI_CMND_RECV                           0x1004
-#define HCI_CMND_ACCEPT                         0x1005
-#define HCI_CMND_LISTEN                         0x1006
-#define HCI_CMND_CONNECT                        0x1007
-#define HCI_CMND_SELECT                         0x1008
-#define HCI_CMND_SETSOCKOPT                     0x1009
-#define HCI_CMND_CLOSE_SOCKET                   0x100B
-#define HCI_CMND_GETHOSTNAME                    0x1010
-#define HCI_CMND_MDNS_ADVERTISE                 0x1011
-
-#define HCI_NETAPP_SET_TIMERS                   0x2009
-
-#define HCI_CMND_SIMPLE_LINK_START              0x4000
-#define HCI_CMND_READ_BUFFER_SIZE               0x400B
-
-//
-// HCI Data commands
-//
-#define HCI_DATA_RECVFROM                       0x84
-#define HCI_DATA_RECV                           0x85
-#define HCI_DATA_NVMEM                          0x91
+#define hci_end_data_begin_receive hci_end_command_begin_receive
 
 //
 // HCI Command/Event argument constants
@@ -139,12 +88,19 @@ uint8_t hci_transfer(uint8_t out)
 {
   uint8_t in = SPI.transfer(out);
   DEBUG_LV4(
-    Serial.print("SPI: ");
-    Serial.print(out, HEX);
-    Serial.print(" -> ");
-    Serial.print(in, HEX);
-    Serial.println();
-    Serial.flush());
+    static char pbuffer[32];
+    if (in > 0x20 && in < 0x7f)
+    sprintf(pbuffer, "SPI: %i[%X] (%c) -> ", in, in, in);
+    else
+      sprintf(pbuffer, "SPI: %i[%X] () -> ", in, in);
+      SERIAL_PRINT(pbuffer);
+      if (out > 0x20 && out < 0x7f)
+        sprintf(pbuffer, "%i[%X] (%c)", out, out, out);
+        else
+          sprintf(pbuffer, "%i[%X] ()", out, out);
+          SERIAL_PRINTLN(pbuffer);
+        );
+
   return in;
 }
 
@@ -185,7 +141,7 @@ uint32_t hci_read_u32_le(void)
   uint8_t b3 = hci_read_u8();
 
   return (uint32_t)b0 | ((uint32_t)b1 << 8) |
-          ((uint32_t)b2 << 16) | ((uint32_t)b3 << 24);
+         ((uint32_t)b2 << 16) | ((uint32_t)b3 << 24);
 }
 
 HCI_ATTR
@@ -286,7 +242,7 @@ void hci_end_receive(void)
   DEBUG_LV3(
     SERIAL_PRINTFUNCTION();
     SERIAL_PRINTVAR(hci_payload_size);
-    )
+  )
 
   // Read and discard any unread portion of the message.
   while (hci_payload_size)
@@ -297,8 +253,7 @@ void hci_end_receive(void)
 
   // 6. The CC3000 device deasserts an IRQ line.
   wdt_reset();
-  while (digitalRead(CC3K_IRQ_PIN) == LOW)
-    ; // intentionally no wdt_reset()
+  while (digitalRead(CC3K_IRQ_PIN) == LOW); // intentionally no wdt_reset()
 }
 
 //
@@ -332,48 +287,50 @@ void hci_dispatch_event(void)
   {
     switch (rx_event_type)
     {
-    case HCI_EVNT_WLAN_UNSOL_CONNECT:
-      wifi_connected = 1;
-      DEBUG_LV3(SERIAL_PRINTVAR(wifi_connected));
-      break;
+      case HCI_EVNT_WLAN_UNSOL_CONNECT:
+        DEBUG_LV2(SERIAL_PRINTLN(F("Connect event")));
+        wifi_connected = 1;
+        DEBUG_LV3(SERIAL_PRINTVAR(wifi_connected));
+        break;
 
-    case HCI_EVNT_WLAN_UNSOL_DISCONNECT:
-      wifi_connected = 0;
-      wifi_dhcp = 0;
-      DEBUG_LV3(SERIAL_PRINTVAR(wifi_connected));
-      DEBUG_LV3(SERIAL_PRINTVAR(wifi_dhcp));
-      break;
+      case HCI_EVNT_WLAN_UNSOL_DISCONNECT:
+        DEBUG_LV2(SERIAL_PRINTLN(F("Disconnect event")));
+        wifi_connected = 0;
+        wifi_dhcp = 0;
+        DEBUG_LV3(SERIAL_PRINTVAR(wifi_connected));
+        DEBUG_LV3(SERIAL_PRINTVAR(wifi_dhcp));
+        break;
 
-    case HCI_EVNT_WLAN_UNSOL_DHCP:
-      wifi_dhcp = 1;
-      DEBUG_LV3(SERIAL_PRINTVAR(wifi_dhcp));
-      hci_read_u8(); // status
-      ip_addr[3] = hci_read_u8();
-      ip_addr[2] = hci_read_u8();
-      ip_addr[1] = hci_read_u8();
-      ip_addr[0] = hci_read_u8();
-      break;
-
-    case HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT:
-      DEBUG_LV3(SERIAL_PRINTVAR(client_socket));
-      wifi_callback(rx_event_type);
-      break;
-
-    case HCI_EVNT_DATA_UNSOL_FREE_BUFF:
-      {
+      case HCI_EVNT_WLAN_UNSOL_DHCP:
+        DEBUG_LV2(SERIAL_PRINTLN(F("DHCP event")));
+        wifi_dhcp = 1;
+        DEBUG_LV3(SERIAL_PRINTVAR(wifi_dhcp));
         hci_read_u8(); // status
-        uint16_t fce_count = hci_read_u16_le();
-        for (uint16_t i = 0; i < fce_count; i++)
-        {
-          hci_read_u16_le(); // ??
-          hci_available_buffer_count += hci_read_u16_le();
-        }
-        DEBUG_LV3(SERIAL_PRINTVAR(hci_available_buffer_count));
-      }
-      break;
+        ip_addr = hci_read_u32_le();
+        break;
 
-    default:
-      break;
+      case HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT:
+        DEBUG_LV2(SERIAL_PRINTLN(F("TCP close event")));
+        wifi_callback(rx_event_type);
+        break;
+
+      case HCI_EVNT_DATA_UNSOL_FREE_BUFF:
+        {
+          DEBUG_LV2(SERIAL_PRINTLN(F("Free Buffer event")));
+          hci_read_u8(); // status
+          uint16_t fce_count = hci_read_u16_le();
+          for (uint16_t i = 0; i < fce_count; i++)
+          {
+            hci_read_u16_le(); // ??
+            hci_available_buffer_count += hci_read_u16_le();
+          }
+          DEBUG_LV3(SERIAL_PRINTVAR(hci_available_buffer_count));
+        }
+        break;
+
+      default:
+        DEBUG_LV2(SERIAL_PRINTLN(F("Dispatch default")));
+        break;
     }
 
     hci_end_receive();
@@ -476,8 +433,8 @@ void hci_begin_first_command(uint16_t opcode, uint16_t argsSize)
   {
     if (millis() - start >= 5000)
     {
-      SERIAL_PRINTLN("Failed to detect CC3000.  Check wiring?");
-      for (;;);
+      SERIAL_PRINTLN(F("Failed to detect CC3000.  Check wiring?"));
+      while (true);
     }
     wdt_reset();
   }
@@ -525,8 +482,7 @@ void hci_begin_command(uint16_t opcode, uint16_t argsSize)
 
   // 2. The CC3000 device asserts IRQ when ready to receive the data.
   wdt_reset();
-  while (hci_state != HCI_STATE_IDLE)
-    ; // intentionally no wdt_reset()
+  while (hci_state != HCI_STATE_IDLE); // intentionally no wdt_reset()
 
   // 3. The master starts the write transaction. The write transaction consists of a 5-byte header
   //    followed by the payload and a padding byte (if required: remember, the total packet length
@@ -556,6 +512,7 @@ void hci_begin_command(uint16_t opcode, uint16_t argsSize)
 HCI_ATTR
 void hci_end_command_begin_receive(uint16_t event)
 {
+  DEBUG_LV3(SERIAL_PRINTFUNCTION());
   hci_pending_event = event;
   hci_pending_event_available = 0;
   hci_data_available = 0;
@@ -569,8 +526,7 @@ void hci_end_command_begin_receive(uint16_t event)
   // 5. The CC3000 device deasserts the IRQ line.
 
   wdt_reset();
-  while (!hci_pending_event_available)
-    ; // intentionally no wdt_reset().
+  while (!hci_pending_event_available); // intentionally no wdt_reset()
 }
 
 //
@@ -592,8 +548,7 @@ void hci_begin_data(uint16_t opcode, uint8_t argsSize, uint16_t bufferSize)
 
   // 2. The CC3000 device asserts IRQ when ready to receive the data.
   wdt_reset();
-  while (hci_state != HCI_STATE_IDLE)
-    ; // intentionally no wdt_reset().
+  while (hci_state != HCI_STATE_IDLE); // intentionally no wdt_reset().
 
   // 3. The master starts the write transaction. The write transaction consists of a 5-byte header
   //    followed by the payload and a padding byte (if required: remember, the total packet length
@@ -614,8 +569,6 @@ void hci_begin_data(uint16_t opcode, uint8_t argsSize, uint16_t bufferSize)
   hci_transfer(totalSize >> 8);
 }
 
-#define hci_end_data_begin_receive hci_end_command_begin_receive
-
 //
 // hci_wait_data
 //
@@ -628,8 +581,7 @@ void hci_wait_data(void)
   DEBUG_LV3(SERIAL_PRINTFUNCTION());
 
   wdt_reset();
-  while (!hci_data_available)
-    ; // intentionally no wdt_reset()
+  while (!hci_data_available); // intentionally no wdt_reset()
 }
 
 //
@@ -710,9 +662,9 @@ void wlan_init(void)
 
 #define MIN_TIMER_VAL_SECONDS      20
 #define MIN_TIMER_SET(t)    if ((0 != t) && (t < MIN_TIMER_VAL_SECONDS)) \
-                            { \
-                                t = MIN_TIMER_VAL_SECONDS; \
-                            }
+  { \
+    t = MIN_TIMER_VAL_SECONDS; \
+  }
 
 long netapp_timeout_values(unsigned long *aucDHCP, unsigned long *aucARP, unsigned long *aucKeepalive, unsigned long *aucInactivity)
 {
@@ -722,7 +674,7 @@ long netapp_timeout_values(unsigned long *aucDHCP, unsigned long *aucARP, unsign
     SERIAL_PRINTVAR(*aucARP);
     SERIAL_PRINTVAR(*aucKeepalive);
     SERIAL_PRINTVAR(*aucInactivity);
-    )
+  )
 
   MIN_TIMER_SET(*aucDHCP)
   MIN_TIMER_SET(*aucARP)
@@ -745,7 +697,7 @@ int32_t wlan_ioctl_set_connection_policy(bool should_connect_to_open_ap, bool sh
     SERIAL_PRINTVAR(should_connect_to_open_ap);
     SERIAL_PRINTVAR(should_use_fast_connect);
     SERIAL_PRINTVAR(use_profiles);
-    )
+  )
 
   hci_begin_command(HCI_CMND_WLAN_IOCTL_SET_CONNECTION_POLICY, 12);
   hci_write_u32_le(should_connect_to_open_ap);
@@ -753,6 +705,19 @@ int32_t wlan_ioctl_set_connection_policy(bool should_connect_to_open_ap, bool sh
   hci_write_u32_le(use_profiles);
 
   return hci_end_command_receive_u32_result(HCI_CMND_WLAN_IOCTL_SET_CONNECTION_POLICY);
+}
+
+int32_t wlan_ioctl_del_profile(uint32_t profile_id)
+{
+  DEBUG_LV2(
+    SERIAL_PRINTFUNCTION();
+    SERIAL_PRINTVAR(profile_id);
+  );
+
+  hci_begin_command(HCI_CMD_WLAN_IOCTL_DEL_PROFILE, 4);
+  hci_write_u32_le(profile_id);
+
+  return hci_end_command_receive_u32_result(HCI_CMD_WLAN_IOCTL_DEL_PROFILE);
 }
 
 int32_t wlan_connect(unsigned long sec_type, const char *ssid, long ssid_len, unsigned char *bssid, unsigned char *key, long key_len)
@@ -765,7 +730,7 @@ int32_t wlan_connect(unsigned long sec_type, const char *ssid, long ssid_len, un
     SERIAL_PRINTVAR((char*)bssid);
     SERIAL_PRINTVAR((char*)key);
     SERIAL_PRINTVAR(key_len);
-    )
+  )
 
   static unsigned char bssid_zero[6] = {0, 0, 0, 0, 0, 0};
 
@@ -787,6 +752,17 @@ int32_t wlan_connect(unsigned long sec_type, const char *ssid, long ssid_len, un
   return hci_end_command_receive_u32_result(HCI_CMND_WLAN_CONNECT);
 }
 
+int32_t wlan_disconnect()
+{
+  DEBUG_LV2(
+    SERIAL_PRINTFUNCTION();
+  );
+
+  hci_begin_command(HCI_CMND_WLAN_DISCONNECT, 0);
+
+  return hci_end_command_receive_u32_result(HCI_CMND_WLAN_DISCONNECT);
+}
+
 int setsockopt(long sd, long level, long optname, const void *optval, unsigned long optlen)
 {
   DEBUG_LV2(
@@ -796,7 +772,7 @@ int setsockopt(long sd, long level, long optname, const void *optval, unsigned l
     SERIAL_PRINTVAR(optname);
     SERIAL_PRINTVAR_HEX((int)optval);
     SERIAL_PRINTVAR(optlen);
-    )
+  )
 
   hci_begin_command(HCI_CMND_SETSOCKOPT, 20 + optlen);
   hci_write_u32_le(sd);
@@ -816,7 +792,7 @@ int socket(long domain, long type, long protocol)
     SERIAL_PRINTVAR(domain);
     SERIAL_PRINTVAR(type);
     SERIAL_PRINTVAR(protocol);
-    )
+  )
 
   hci_begin_command(HCI_CMND_SOCKET, 12);
   hci_write_u32_le(domain);
@@ -832,7 +808,7 @@ int listen(int sd, int backlog)
     SERIAL_PRINTFUNCTION();
     SERIAL_PRINTVAR(sd);
     SERIAL_PRINTVAR(backlog);
-    )
+  )
 
   hci_begin_command(HCI_CMND_LISTEN, 8);
   hci_write_u32_le(sd);
@@ -850,7 +826,7 @@ int bind(int sd, struct _sockaddr_t *addr, int addrlen)
     SERIAL_PRINTVAR(((_sockaddr_in_t*)addr)->sin_family);
     SERIAL_PRINTVAR(((_sockaddr_in_t*)addr)->sin_port);
     SERIAL_PRINTVAR_HEX(((_sockaddr_in_t*)addr)->sin_addr.s_addr);
-    )
+  )
 
   hci_begin_command(HCI_CMND_BIND, 20);
   hci_write_u32_le(sd);
@@ -866,7 +842,7 @@ int accept(int sd, struct sockaddr_t *addr, unsigned long *addrlen)
   DEBUG_LV2(
     SERIAL_PRINTFUNCTION();
     SERIAL_PRINTVAR(sd);
-    )
+  )
 
   hci_begin_command(HCI_CMND_ACCEPT, 4);
   hci_write_u32_le(sd);
@@ -902,7 +878,7 @@ int recv(int sd, void *buffer, int size, int flags)
     SERIAL_PRINTVAR(sd);
     SERIAL_PRINTVAR(size);
     SERIAL_PRINTVAR(flags);
-    )
+  )
 
   hci_begin_command(HCI_CMND_RECV, 12);
   hci_write_u32_le(sd);
@@ -946,6 +922,54 @@ int recv(int sd, void *buffer, int size, int flags)
   return return_length;
 }
 
+int recvfrom(int sd, void *buffer, int size, int flags, sockaddr *remaddr, socklen_t *len)
+{
+  DEBUG_LV2(SERIAL_PRINTFUNCTION());
+
+  long return_length;
+
+  hci_begin_command(HCI_CMND_RECVFROM, 12);
+  hci_write_u32_le(sd);
+  hci_write_u32_le(size);
+  hci_write_u32_le(flags);
+
+  hci_end_command_begin_receive(HCI_CMND_RECVFROM);
+
+  hci_read_status();
+
+  long return_sd = hci_read_u32_le();
+  DEBUG_LV2(SERIAL_PRINTVAR(return_sd));
+
+  return_length = hci_read_u32_le();
+  DEBUG_LV2(SERIAL_PRINTVAR(return_length));
+
+  long return_flags = hci_read_u32_le();
+  DEBUG_LV2(SERIAL_PRINTVAR_HEX(return_flags));
+
+  hci_end_receive();
+
+  if (return_length > 0)
+  {
+    // TODO: while waiting for data, we need to handle unsolicited client drops
+    //  and stop waiting.
+    // Also for safety, the interrupt handler should be able to ignore
+    //  unsolicited data when we're not waiting.
+    // Thus, the intention to wait for data must be indicated to hci_end_receive,
+    //  e.g. hci_end_receive_with_data.
+    hci_wait_data();
+
+    if (return_length > size)
+      return_length = size;
+
+    for (int i = 0; i < return_length; i++)
+      ((uint8_t*)buffer)[i] = hci_read_u8();
+
+    hci_end_receive();
+  }
+
+  return return_length;
+}
+
 int send(int sd, const void *buffer, int size, int flags)
 {
   DEBUG_LV2(
@@ -953,12 +977,11 @@ int send(int sd, const void *buffer, int size, int flags)
     SERIAL_PRINTVAR(sd);
     SERIAL_PRINTVAR(size);
     SERIAL_PRINTVAR(flags);
-    )
+  );
 
   DEBUG_LV3(SERIAL_PRINTVAR(hci_available_buffer_count));
   wdt_reset();
-  while (hci_available_buffer_count == 0)
-    ; // intentionally no wdt_reset()
+  while (hci_available_buffer_count == 0); // intentionally no wdt_reset()
   hci_available_buffer_count--;
 
   hci_begin_data(HCI_CMND_SEND, 16, size);
@@ -968,7 +991,37 @@ int send(int sd, const void *buffer, int size, int flags)
   hci_write_u32_le(flags);
   hci_write_array(buffer, size);
 
-  hci_end_data_begin_receive(HCI_EVNT_SEND);
+  hci_end_data_begin_receive(HCI_EVNT_DATA_SEND);
+  hci_end_receive();
+
+  return size;
+}
+
+int sendto(int sd, const void *buffer, int size, int flags, const sockaddr *to, socklen_t tolen)
+{
+  DEBUG_LV2(
+    SERIAL_PRINTFUNCTION();
+    SERIAL_PRINTVAR(tolen);
+  );
+
+  DEBUG_LV3(SERIAL_PRINTVAR(hci_available_buffer_count));
+  wdt_reset();
+  while (hci_available_buffer_count == 0);
+  hci_available_buffer_count--;
+
+  uint16_t payload_size = size + tolen;
+
+  hci_begin_data(HCI_CMND_SENDTO, 24, payload_size);
+  hci_write_u32_le(sd);
+  hci_write_u32_le(20);
+  hci_write_u32_le(size);
+  hci_write_u32_le(flags);
+  hci_write_u32_le(size + 8); // unused offset
+  hci_write_u32_le(8); // unused length
+  hci_write_array(buffer, size);
+  hci_write_array(to, tolen);
+
+  hci_end_data_begin_receive(HCI_EVNT_DATA_SENDTO);
   hci_end_receive();
 
   return size;
@@ -979,11 +1032,10 @@ int closesocket(int sd)
   DEBUG_LV2(
     SERIAL_PRINTFUNCTION();
     SERIAL_PRINTVAR(sd);
-    )
+  )
 
   wdt_reset();
-  while (hci_available_buffer_count != hci_buffer_count)
-    ; // intentionally no wdt_reset()
+  while (hci_available_buffer_count != hci_buffer_count); // intentionally no wdt_reset()
 
   hci_begin_command(HCI_CMND_CLOSE_SOCKET, 4);
   hci_write_u32_le(sd);
@@ -996,7 +1048,7 @@ int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, time
   DEBUG_LV2(
     SERIAL_PRINTFUNCTION();
     SERIAL_PRINTVAR(nfds);
-    )
+  )
 
   hci_begin_command(HCI_CMND_SELECT, 44);
   hci_write_u32_le(nfds);
@@ -1005,9 +1057,9 @@ int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, time
   hci_write_u32_le(0x14);
   hci_write_u32_le(0x14);
   hci_write_u32_le(timeout != NULL);
-  hci_write_u32_le(((readsds) ? *(unsigned long*)readsds : 0));
-  hci_write_u32_le(((writesds) ? *(unsigned long*)writesds : 0));
-  hci_write_u32_le(((exceptsds) ? *(unsigned long*)exceptsds : 0));
+  hci_write_u32_le(((readsds) ? * (unsigned long*)readsds : 0));
+  hci_write_u32_le(((writesds) ? * (unsigned long*)writesds : 0));
+  hci_write_u32_le(((exceptsds) ? * (unsigned long*)exceptsds : 0));
   if (timeout)
   {
     if (timeout->tv_sec == 0 && timeout->tv_usec < 5000)
@@ -1047,17 +1099,39 @@ int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, time
 
 int connect(long sd, const sockaddr *addr, long addrlen)
 {
-  return 0;
+  DEBUG_LV2(
+    SERIAL_PRINTFUNCTION();
+    SERIAL_PRINTVAR(sd);
+  );
+  
+  int result;
+  
+  hci_begin_command(HCI_CMND_CONNECT, 20);
+  hci_write_u32_le(sd);
+  hci_write_u32_le(8);
+  hci_write_u32_le(8);
+  hci_write_array(addr, 8);
+  hci_end_command_begin_receive(HCI_CMND_CONNECT); // event has same value as command
+  
+  hci_read_status();
+  if(hci_read_u32_le() == 0) {
+    result = 0;
+  } else {
+    result = -1;
+  }
+  
+  return result;
 }
 
+// returns positive on success, negative on error.
 int gethostbyname(char *hostname, unsigned short hnLength, uint32_t *ip)
 {
   DEBUG_LV2(
     SERIAL_PRINTFUNCTION();
-    SERIAL_PRINTVAR(url);
-    SERIAL_PRINTVAR(len);
-    SERIAL_PRINTVAR(ip);
-    )
+    SERIAL_PRINTVAR(hostname);
+    SERIAL_PRINTVAR(hnLength);
+    // SERIAL_PRINTVAR(ip);
+  )
 
   // Sanity checks
   if (!hostname || !hnLength || hnLength > HOSTNAME_MAX_LENGTH)
@@ -1079,6 +1153,62 @@ int gethostbyname(char *hostname, unsigned short hnLength, uint32_t *ip)
   return return_status;
 }
 
+int netappipconfig(netapp_ipconfig_t *ipconfig)
+{
+  DEBUG_LV2(
+    SERIAL_PRINTFUNCTION();
+  );
+
+  // Send command
+  hci_begin_command(HCI_NETAPP_IPCONFIG, 0);
+  hci_end_command_begin_receive(HCI_NETAPP_IPCONFIG);
+
+  // Get result
+  hci_read_status();
+  ipconfig->ipAddr = hci_read_u32_le();
+  ipconfig->subnet = hci_read_u32_le();
+  ipconfig->gateway = hci_read_u32_le();
+  ipconfig->DHCPServer = hci_read_u32_le();
+  ipconfig->DNSServer = hci_read_u32_le();
+  for (uint8_t i = 0; i < 6; i++)
+  {
+    ipconfig->macAddr[i] = hci_read_u8();
+  }
+  for (uint8_t i = 0; i < 32; i++)
+  {
+    ipconfig->ssid[i] = hci_read_u8();
+  }
+  hci_end_receive();
+
+  return 0;
+}
+
+uint16_t getFirmwareVersion()
+{
+  DEBUG_LV2(
+    SERIAL_PRINTFUNCTION();
+  );
+
+  // Send command
+  hci_begin_command(HCI_CMND_READ_SP_VERSION, 0);
+  hci_end_command_begin_receive(HCI_CMND_READ_SP_VERSION);
+
+  // Get result
+  uint8_t package, build;
+  hci_read_status();
+  hci_read_u16_le(); // first 2 bytes ignored
+  package = hci_read_u8();
+  build = hci_read_u8();
+  hci_end_receive();
+
+  DEBUG_LV3(
+    SERIAL_PRINTVAR_HEX(package);
+    SERIAL_PRINTVAR_HEX(build);
+  );
+
+  return ((uint16_t)package << 8) | (uint16_t)build;
+}
+
 //
 // From CC3000 fw version 1.32 and up the module does not longer
 // support the mdnsAdvertise command. Instead this has to be
@@ -1092,7 +1222,7 @@ int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned
     SERIAL_PRINTVAR(mdnsEnabled);
     SERIAL_PRINTVAR(deviceServiceName);
     SERIAL_PRINTVAR(deviceServiceNameLength);
-    )
+  )
 
   if (deviceServiceNameLength > MDNS_DEVICE_SERVICE_MAX_LENGTH)
     return -1;
@@ -1105,3 +1235,4 @@ int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned
   return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
 }
 #endif
+
