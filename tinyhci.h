@@ -60,24 +60,36 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 
 typedef struct _in_addr_t
 {
-    uint32_t         s_addr;                // load with inet_aton()
+  uint32_t         s_addr;                // load with inet_aton()
 } in_addr;
 
 typedef struct _sockaddr_t
 {
-    uint16_t         sa_family;
-    uint8_t          sa_data[14];
+  uint16_t         sa_family;
+  uint8_t          sa_data[14];
 } sockaddr;
 
 typedef struct _sockaddr_in_t
 {
-    int16_t          sin_family;            // e.g. AF_INET
-    uint16_t         sin_port;              // e.g. htons(3490)
-    in_addr          sin_addr;              // see struct in_addr, below
-    uint8_t          sin_zero[8];           // zero this if you want to
+  int16_t          sin_family;            // e.g. AF_INET
+  uint16_t         sin_port;              // e.g. htons(3490)
+  in_addr          sin_addr;              // see struct in_addr, below
+  uint8_t          sin_zero[8];           // zero this if you want to
 } sockaddr_in;
 
 typedef unsigned long socklen_t;
+
+// ipconfig
+typedef struct _netapp_ipconfig_t
+{
+  uint32_t ipAddr;
+  uint32_t subnet;
+  uint32_t gateway;
+  uint32_t DHCPServer;
+  uint32_t DNSServer;
+  uint8_t macAddr[6];
+  uint8_t ssid[32];
+} netapp_ipconfig_t;
 
 #ifdef __AVR__
 typedef unsigned long time_t;  /* KTown: Updated to be compatible with Arduino Time.h */
@@ -89,8 +101,8 @@ typedef long suseconds_t;
 
 typedef struct _timeval_t
 {
-    time_t         tv_sec;                  /* seconds */
-    suseconds_t    tv_usec;                 /* microseconds */
+  time_t         tv_sec;                  /* seconds */
+  suseconds_t    tv_usec;                 /* microseconds */
 } timeval;
 
 // The fd_set member is required to be an array of longs.
@@ -110,7 +122,7 @@ typedef long int __fd_mask;
 // fd_set for select and pselect.
 typedef struct
 {
-    __fd_mask fds_bits[__FD_SETSIZE / __NFDBITS];
+  __fd_mask fds_bits[__FD_SETSIZE / __NFDBITS];
 #define __FDS_BITS(set)        ((set)->fds_bits)
 } fd_set;
 
@@ -164,6 +176,8 @@ typedef struct
 #define WLAN_SEC_WPA               2
 #define WLAN_SEC_WPA2              3
 
+#define INADDR_ANY                  0
+
 #define AF_INET                		2
 
 #define SOCK_STREAM            		1
@@ -189,8 +203,6 @@ extern volatile uint8_t wifi_connected;
 extern volatile uint8_t wifi_dhcp;
 extern volatile uint8_t ip_addr[4];
 
-extern volatile int16_t client_socket;
-
 //*****************************************************************************
 //                  ERROR CODES
 //*****************************************************************************
@@ -201,7 +213,9 @@ extern volatile int16_t client_socket;
 void wlan_init(void);
 long netapp_timeout_values(unsigned long *aucDHCP, unsigned long *aucARP, unsigned long *aucKeepalive, unsigned long *aucInactivity);
 int32_t wlan_ioctl_set_connection_policy(bool should_connect_to_open_ap, bool should_use_fast_connect, bool use_profiles);
+int32_t wlan_ioctl_del_profile(uint32_t profile_id);
 int32_t wlan_connect(unsigned long sec_type, const char *ssid, long ssid_len, unsigned char *bssid, unsigned char *key, long key_len);
+int32_t wlan_disconnect();
 int connect(long sd, const sockaddr *addr, long addrlen);
 int setsockopt(long sd, long level, long optname, const void *optval, unsigned long optlen);
 int socket(long domain, long type, long protocol);
@@ -209,10 +223,16 @@ int listen(int sd, int backlog);
 int bind(int sd, struct _sockaddr_t *addr, int addrlen);
 int accept(int sd, struct sockaddr_t *addr, unsigned long *addrlen);
 int recv(int sd, void *buffer, int size, int flags);
+int recvfrom(int fd, void *buffer, int size, int flags, sockaddr *remaddr, socklen_t *len);
 int send(int sd, const void *buffer, int size, int flags);
+int sendto(int sd, const void *buffer, int size, int flags, const sockaddr *to, socklen_t tolen);
 int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, timeval *timeout);
 int closesocket(int sd);
 int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned short deviceServiceNameLength);
 int gethostbyname(char *url, unsigned short len, unsigned long *ip);
 
+int netappipconfig(netapp_ipconfig_t *ipconfig);
+uint16_t getFirmwareVersion();
+
 #endif
+
