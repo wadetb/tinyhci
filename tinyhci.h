@@ -39,7 +39,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //
 // Serial port helper macros.
 //
-#define SERIAL_PORT                Serial1
+#define SERIAL_PORT                Serial
 #define SERIAL_PRINT(x)            SERIAL_PORT.print(x); SERIAL_PORT.flush()
 #define SERIAL_PRINTLN(x)          SERIAL_PORT.println(x); SERIAL_PORT.flush()
 #define SERIAL_PRINTFUNCTION()     SERIAL_PORT.print("==> "); SERIAL_PORT.print(__FUNCTION__); SERIAL_PORT.println(" <=="); SERIAL_PORT.flush()
@@ -47,9 +47,64 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 #define SERIAL_PRINTVAR_HEX(x)     SERIAL_PORT.print(#x ": "); SERIAL_PORT.println(x, HEX); SERIAL_PORT.flush()
 
 //
+// HCI interface constants
+//
+#define HCI_STATE_IDLE                          0
+#define HCI_STATE_WAIT_ASSERT                   1
+
+#define HCI_READ                                0x3
+#define HCI_WRITE                               0x1
+
+#define HCI_TYPE_CMND                           0x1
+#define HCI_TYPE_DATA                           0x2
+#define HCI_TYPE_PATCH                          0x3
+#define HCI_TYPE_EVNT                           0x4
+
+//
+// HCI Command IDs
+//
+#define HCI_CMND_WLAN_CONNECT                   0x0001
+#define HCI_CMND_WLAN_DISCONNECT                0x0002
+#define HCI_CMND_WLAN_IOCTL_SET_CONNECTION_POLICY 0x0004
+#define HCI_CMD_WLAN_IOCTL_DEL_PROFILE          0x0006
+#define HCI_CMND_EVENT_MASK                     0x0008
+
+#define HCI_CMND_SEND                           0x0081
+#define HCI_CMND_SENDTO                         0x0083
+#define HCI_DATA_BSD_RECVFROM                   0x0084
+#define HCI_DATA_BSD_RECV                       0x0085
+
+#define HCI_CMND_SOCKET                         0x1001
+#define HCI_CMND_BIND                           0x1002
+#define HCI_CMND_RECV                           0x1004
+#define HCI_CMND_RECVFROM                       0x100D
+#define HCI_CMND_ACCEPT                         0x1005
+#define HCI_CMND_LISTEN                         0x1006
+#define HCI_CMND_CONNECT                        0x1007
+#define HCI_CMND_SELECT                         0x1008
+#define HCI_CMND_SETSOCKOPT                     0x1009
+#define HCI_CMND_CLOSE_SOCKET                   0x100B
+#define HCI_CMND_GETHOSTNAME                    0x1010
+#define HCI_CMND_MDNS_ADVERTISE                 0x1011
+
+#define HCI_NETAPP_SET_TIMERS                   0x2009
+#define HCI_NETAPP_IPCONFIG                     0x2005
+#define HCI_CMND_READ_SP_VERSION                0x0207
+
+#define HCI_CMND_SIMPLE_LINK_START              0x4000
+#define HCI_CMND_READ_BUFFER_SIZE               0x400B
+
+//
+// HCI Data commands
+//
+#define HCI_DATA_RECVFROM                       0x84
+#define HCI_DATA_RECV                           0x85
+#define HCI_DATA_NVMEM                          0x91
+//
 // HCI Event IDs
 //
-#define HCI_EVNT_SEND                           0x1003
+#define HCI_EVNT_DATA_SEND                      0x1003
+#define HCI_EVNT_DATA_SENDTO                    0x100F
 #define HCI_EVNT_DATA_UNSOL_FREE_BUFF           0x4100
 #define HCI_EVNT_WLAN_UNSOL_CONNECT             0x8001
 #define HCI_EVNT_WLAN_UNSOL_DISCONNECT          0x8002
@@ -60,24 +115,36 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 
 typedef struct _in_addr_t
 {
-    uint32_t         s_addr;                // load with inet_aton()
+  uint32_t         s_addr;                // load with inet_aton()
 } in_addr;
 
 typedef struct _sockaddr_t
 {
-    uint16_t         sa_family;
-    uint8_t          sa_data[14];
+  uint16_t         sa_family;
+  uint8_t          sa_data[14];
 } sockaddr;
 
 typedef struct _sockaddr_in_t
 {
-    int16_t          sin_family;            // e.g. AF_INET
-    uint16_t         sin_port;              // e.g. htons(3490)
-    in_addr          sin_addr;              // see struct in_addr, below
-    uint8_t          sin_zero[8];           // zero this if you want to
+  int16_t          sin_family;            // e.g. AF_INET
+  uint16_t         sin_port;              // e.g. htons(3490)
+  in_addr          sin_addr;              // see struct in_addr, below
+  uint8_t          sin_zero[8];           // zero this if you want to
 } sockaddr_in;
 
 typedef unsigned long socklen_t;
+
+// ipconfig
+typedef struct _netapp_ipconfig_t
+{
+  uint32_t ipAddr;
+  uint32_t subnet;
+  uint32_t gateway;
+  uint32_t DHCPServer;
+  uint32_t DNSServer;
+  uint8_t macAddr[6];
+  uint8_t ssid[32];
+} netapp_ipconfig_t;
 
 #ifdef __AVR__
 typedef unsigned long time_t;  /* KTown: Updated to be compatible with Arduino Time.h */
@@ -89,8 +156,8 @@ typedef long suseconds_t;
 
 typedef struct _timeval_t
 {
-    time_t         tv_sec;                  /* seconds */
-    suseconds_t    tv_usec;                 /* microseconds */
+  time_t         tv_sec;                  /* seconds */
+  suseconds_t    tv_usec;                 /* microseconds */
 } timeval;
 
 // The fd_set member is required to be an array of longs.
@@ -110,7 +177,7 @@ typedef long int __fd_mask;
 // fd_set for select and pselect.
 typedef struct
 {
-    __fd_mask fds_bits[__FD_SETSIZE / __NFDBITS];
+  __fd_mask fds_bits[__FD_SETSIZE / __NFDBITS];
 #define __FDS_BITS(set)        ((set)->fds_bits)
 } fd_set;
 
@@ -164,6 +231,8 @@ typedef struct
 #define WLAN_SEC_WPA               2
 #define WLAN_SEC_WPA2              3
 
+#define INADDR_ANY                  0
+
 #define AF_INET                		2
 
 #define SOCK_STREAM            		1
@@ -187,9 +256,8 @@ typedef struct
 
 extern volatile uint8_t wifi_connected;
 extern volatile uint8_t wifi_dhcp;
-extern volatile uint8_t ip_addr[4];
+extern volatile uint32_t ip_addr;
 
-extern volatile int16_t client_socket;
 
 //*****************************************************************************
 //                  ERROR CODES
@@ -201,7 +269,9 @@ extern volatile int16_t client_socket;
 void wlan_init(void);
 long netapp_timeout_values(unsigned long *aucDHCP, unsigned long *aucARP, unsigned long *aucKeepalive, unsigned long *aucInactivity);
 int32_t wlan_ioctl_set_connection_policy(bool should_connect_to_open_ap, bool should_use_fast_connect, bool use_profiles);
+int32_t wlan_ioctl_del_profile(uint32_t profile_id);
 int32_t wlan_connect(unsigned long sec_type, const char *ssid, long ssid_len, unsigned char *bssid, unsigned char *key, long key_len);
+int32_t wlan_disconnect();
 int connect(long sd, const sockaddr *addr, long addrlen);
 int setsockopt(long sd, long level, long optname, const void *optval, unsigned long optlen);
 int socket(long domain, long type, long protocol);
@@ -209,10 +279,16 @@ int listen(int sd, int backlog);
 int bind(int sd, struct _sockaddr_t *addr, int addrlen);
 int accept(int sd, struct sockaddr_t *addr, unsigned long *addrlen);
 int recv(int sd, void *buffer, int size, int flags);
+int recvfrom(int fd, void *buffer, int size, int flags, sockaddr *remaddr, socklen_t *len);
 int send(int sd, const void *buffer, int size, int flags);
+int sendto(int sd, const void *buffer, int size, int flags, const sockaddr *to, socklen_t tolen);
 int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, timeval *timeout);
 int closesocket(int sd);
 int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned short deviceServiceNameLength);
 int gethostbyname(char *url, unsigned short len, unsigned long *ip);
 
+int netappipconfig(netapp_ipconfig_t *ipconfig);
+uint16_t getFirmwareVersion();
+
 #endif
+
