@@ -120,18 +120,6 @@ static volatile uint8_t hci_state;
 #define HCI_DATA_RECVFROM                       0x84
 #define HCI_DATA_RECV                           0x85
 #define HCI_DATA_NVMEM                          0x91
-//
-// HCI Event IDs
-//
-#define HCI_EVNT_DATA_SEND                      0x1003
-#define HCI_EVNT_DATA_SENDTO                    0x100F
-#define HCI_EVNT_DATA_UNSOL_FREE_BUFF           0x4100
-#define HCI_EVNT_WLAN_UNSOL_CONNECT             0x8001
-#define HCI_EVNT_WLAN_UNSOL_DISCONNECT          0x8002
-#define HCI_EVNT_WLAN_UNSOL_INIT                0x8004
-#define HCI_EVNT_WLAN_UNSOL_DHCP                0x8010
-#define HCI_EVNT_WLAN_KEEPALIVE                 0x8200
-#define HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT      0x8800
 
 //
 // HCI Command/Event argument constants
@@ -140,7 +128,6 @@ static volatile uint8_t hci_state;
 
 #define HCI_ATTR __attribute__((noinline))
 
-void wifi_callback(uint16_t event);
 //
 // hci_transfer
 //
@@ -372,15 +359,15 @@ void hci_dispatch_event(void)
         wifi_dhcp = 1;
         DEBUG_LV3(SERIAL_PRINTVAR(wifi_dhcp));
         hci_read_u8(); // status
-      ip_addr[3] = hci_read_u8();
-      ip_addr[2] = hci_read_u8();
-      ip_addr[1] = hci_read_u8();
-      ip_addr[0] = hci_read_u8();
+        ip_addr[3] = hci_read_u8();
+        ip_addr[2] = hci_read_u8();
+        ip_addr[1] = hci_read_u8();
+        ip_addr[0] = hci_read_u8();
         break;
 
       case HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT:
         DEBUG_LV2(SERIAL_PRINTLN(F("TCP close event")));
-        wifi_callback(rx_event_type);
+        wlan_callback(rx_event_type);
         break;
 
       case HCI_EVNT_DATA_UNSOL_FREE_BUFF:

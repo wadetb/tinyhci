@@ -14,6 +14,13 @@ uint8_t recv_buf_idx = 0;
 int recv_buf_avail = 0;
 
 int16_t listen_socket;
+int16_t client_socket;
+
+void wlan_callback(uint16_t event)
+{
+  if (event == HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT)  
+    client_socket = -1;
+}
 
 void wifi_connect(void)
 {
