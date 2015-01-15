@@ -32,11 +32,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 
 
 //
-// Define the fw version of the CC3000 module you are running against.
-//
-#define CC3000_FW_VERSION         132
-
-//
 // Redefine these based on your particular hardware.
 //
 #define CC3K_CS_PIN               10
@@ -49,7 +44,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //
 volatile uint8_t wifi_connected = 0;
 volatile uint8_t wifi_dhcp = 0;
-volatile uint32_t ip_addr;
 
 //
 // Static variables
@@ -306,7 +300,7 @@ void hci_dispatch_event(void)
         wifi_dhcp = 1;
         DEBUG_LV3(SERIAL_PRINTVAR(wifi_dhcp));
         hci_read_u8(); // status
-        ip_addr = hci_read_u32_le();
+        hci_read_u32_le(); // IP Address
         break;
 
       case HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT:
@@ -1214,7 +1208,6 @@ uint16_t getFirmwareVersion()
 // support the mdnsAdvertise command. Instead this has to be
 // implemented in software. This is why we check here for the fw
 // version.
-#if CC3000_FW_VERSION < 132
 int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned short deviceServiceNameLength)
 {
   DEBUG_LV2(
@@ -1223,6 +1216,10 @@ int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned
     SERIAL_PRINTVAR(deviceServiceName);
     SERIAL_PRINTVAR(deviceServiceNameLength);
   )
+
+  if(getFirmwareVersion() >= 0x0120) {
+	return -1;
+  }
 
   if (deviceServiceNameLength > MDNS_DEVICE_SERVICE_MAX_LENGTH)
     return -1;
@@ -1234,5 +1231,4 @@ int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned
   hci_write_array(deviceServiceName, deviceServiceNameLength);
   return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
 }
-#endif
 
