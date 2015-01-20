@@ -39,7 +39,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //
 // Serial port helper macros.
 //
-#define SERIAL_PORT                Serial
+#define SERIAL_PORT                Serial1
 #define SERIAL_PRINT(x)            SERIAL_PORT.print(x); SERIAL_PORT.flush()
 #define SERIAL_PRINTLN(x)          SERIAL_PORT.println(x); SERIAL_PORT.flush()
 #define SERIAL_PRINTFUNCTION()     SERIAL_PORT.print("==> "); SERIAL_PORT.print(__FUNCTION__); SERIAL_PORT.println(" <=="); SERIAL_PORT.flush()
@@ -47,64 +47,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 #define SERIAL_PRINTVAR_HEX(x)     SERIAL_PORT.print(#x ": "); SERIAL_PORT.println(x, HEX); SERIAL_PORT.flush()
 
 //
-// HCI interface constants
-//
-#define HCI_STATE_IDLE                          0
-#define HCI_STATE_WAIT_ASSERT                   1
-
-#define HCI_READ                                0x3
-#define HCI_WRITE                               0x1
-
-#define HCI_TYPE_CMND                           0x1
-#define HCI_TYPE_DATA                           0x2
-#define HCI_TYPE_PATCH                          0x3
-#define HCI_TYPE_EVNT                           0x4
-
-//
-// HCI Command IDs
-//
-#define HCI_CMND_WLAN_CONNECT                   0x0001
-#define HCI_CMND_WLAN_DISCONNECT                0x0002
-#define HCI_CMND_WLAN_IOCTL_SET_CONNECTION_POLICY 0x0004
-#define HCI_CMD_WLAN_IOCTL_DEL_PROFILE          0x0006
-#define HCI_CMND_EVENT_MASK                     0x0008
-
-#define HCI_CMND_SEND                           0x0081
-#define HCI_CMND_SENDTO                         0x0083
-#define HCI_DATA_BSD_RECVFROM                   0x0084
-#define HCI_DATA_BSD_RECV                       0x0085
-
-#define HCI_CMND_SOCKET                         0x1001
-#define HCI_CMND_BIND                           0x1002
-#define HCI_CMND_RECV                           0x1004
-#define HCI_CMND_RECVFROM                       0x100D
-#define HCI_CMND_ACCEPT                         0x1005
-#define HCI_CMND_LISTEN                         0x1006
-#define HCI_CMND_CONNECT                        0x1007
-#define HCI_CMND_SELECT                         0x1008
-#define HCI_CMND_SETSOCKOPT                     0x1009
-#define HCI_CMND_CLOSE_SOCKET                   0x100B
-#define HCI_CMND_GETHOSTNAME                    0x1010
-#define HCI_CMND_MDNS_ADVERTISE                 0x1011
-
-#define HCI_NETAPP_SET_TIMERS                   0x2009
-#define HCI_NETAPP_IPCONFIG                     0x2005
-#define HCI_CMND_READ_SP_VERSION                0x0207
-
-#define HCI_CMND_SIMPLE_LINK_START              0x4000
-#define HCI_CMND_READ_BUFFER_SIZE               0x400B
-
-//
-// HCI Data commands
-//
-#define HCI_DATA_RECVFROM                       0x84
-#define HCI_DATA_RECV                           0x85
-#define HCI_DATA_NVMEM                          0x91
-//
 // HCI Event IDs
 //
-#define HCI_EVNT_DATA_SEND                      0x1003
-#define HCI_EVNT_DATA_SENDTO                    0x100F
+#define HCI_EVNT_SEND                           0x1003
 #define HCI_EVNT_DATA_UNSOL_FREE_BUFF           0x4100
 #define HCI_EVNT_WLAN_UNSOL_CONNECT             0x8001
 #define HCI_EVNT_WLAN_UNSOL_DISCONNECT          0x8002
@@ -256,8 +201,7 @@ typedef struct
 
 extern volatile uint8_t wifi_connected;
 extern volatile uint8_t wifi_dhcp;
-extern volatile uint32_t ip_addr;
-
+extern volatile uint8_t ip_addr[4];
 
 //*****************************************************************************
 //                  ERROR CODES
@@ -289,6 +233,29 @@ int gethostbyname(char *url, unsigned short len, unsigned long *ip);
 
 int netappipconfig(netapp_ipconfig_t *ipconfig);
 uint16_t getFirmwareVersion();
+
+//
+// HCI Event IDs
+//
+#define HCI_EVNT_DATA_SEND                      0x1003
+#define HCI_EVNT_DATA_SENDTO                    0x100F
+#define HCI_EVNT_DATA_UNSOL_FREE_BUFF           0x4100
+#define HCI_EVNT_WLAN_UNSOL_CONNECT             0x8001
+#define HCI_EVNT_WLAN_UNSOL_DISCONNECT          0x8002
+#define HCI_EVNT_WLAN_UNSOL_INIT                0x8004
+#define HCI_EVNT_WLAN_UNSOL_DHCP                0x8010
+#define HCI_EVNT_WLAN_KEEPALIVE                 0x8200
+#define HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT      0x8800
+
+//
+// wlan_callback must be implemented by user.
+//
+// It will be invoked in response to the following external events:
+// - HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT
+//
+// Use caution as it executes in an interrupt handler.
+//
+void wlan_callback(uint16_t event);
 
 #endif
 
