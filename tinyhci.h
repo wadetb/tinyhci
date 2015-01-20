@@ -21,6 +21,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 #ifndef __TINYHCI_H__
 #define __TINYHCI_H__
 
+#define USE_WATCHDOG 0
+
+#if USE_WATCHDOG
+#include <avr/wdt.h>
+#else
+#define wdt_reset()
+#endif
+
 //
 // Debugging macros
 //
@@ -39,7 +47,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //
 // Serial port helper macros.
 //
-#define SERIAL_PORT                Serial1
+#define SERIAL_PORT                Serial
 #define SERIAL_PRINT(x)            SERIAL_PORT.print(x); SERIAL_PORT.flush()
 #define SERIAL_PRINTLN(x)          SERIAL_PORT.println(x); SERIAL_PORT.flush()
 #define SERIAL_PRINTFUNCTION()     SERIAL_PORT.print("==> "); SERIAL_PORT.print(__FUNCTION__); SERIAL_PORT.println(" <=="); SERIAL_PORT.flush()
@@ -201,7 +209,6 @@ typedef struct
 
 extern volatile uint8_t wifi_connected;
 extern volatile uint8_t wifi_dhcp;
-extern volatile uint8_t ip_addr[4];
 
 //*****************************************************************************
 //                  ERROR CODES
@@ -233,6 +240,7 @@ int gethostbyname(char *url, unsigned short len, unsigned long *ip);
 
 int netappipconfig(netapp_ipconfig_t *ipconfig);
 uint16_t getFirmwareVersion();
+void getIPdots(uint32_t ipaddr, char *buf, int rev);
 
 //
 // HCI Event IDs

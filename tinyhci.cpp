@@ -20,27 +20,15 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 */
 #include <Arduino.h>
 #include <SPI.h>
+#include <string.h>
 #include "tinyhci.h"
-
-#define USE_WATCHDOG 1
-
-#if USE_WATCHDOG
-#include <avr/wdt.h>
-#else
-#define wdt_reset()
-#endif
-
-//
-// Define the fw version of the CC3000 module you are running against.
-//
-#define CC3000_FW_VERSION         132
 
 //
 // Redefine these based on your particular hardware.
 //
 #define CC3K_CS_PIN               10
 #define CC3K_IRQ_PIN              3
-#define CC3K_EN_PIN               7
+#define CC3K_EN_PIN               5
 #define CC3K_IRQ_NUM              1
 
 //
@@ -48,7 +36,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 //
 volatile uint8_t wifi_connected = 0;
 volatile uint8_t wifi_dhcp = 0;
-volatile uint8_t ip_addr[4];
 
 //
 // Static variables
@@ -138,20 +125,20 @@ HCI_ATTR
 uint8_t hci_transfer(uint8_t out)
 {
   uint8_t in = SPI.transfer(out);
-  
+
   DEBUG_LV4(
     static char pbuffer[32];
     if (in > 0x20 && in < 0x7f)
-      sprintf(pbuffer, "SPI: %i[%X] (%c) -> ", in, in, in);
+    sprintf(pbuffer, "SPI: %i[%X] (%c) -> ", in, in, in);
     else
       sprintf(pbuffer, "SPI: %i[%X] () -> ", in, in);
-    SERIAL_PRINT(pbuffer);
-    if (out > 0x20 && out < 0x7f)
-      sprintf(pbuffer, "%i[%X] (%c)", out, out, out);
-    else
-      sprintf(pbuffer, "%i[%X] ()", out, out);
-    SERIAL_PRINTLN(pbuffer);
-    );
+      SERIAL_PRINT(pbuffer);
+      if (out > 0x20 && out < 0x7f)
+        sprintf(pbuffer, "%i[%X] (%c)", out, out, out);
+        else
+          sprintf(pbuffer, "%i[%X] ()", out, out);
+          SERIAL_PRINTLN(pbuffer);
+        );
 
   return in;
 }
@@ -359,10 +346,7 @@ void hci_dispatch_event(void)
         wifi_dhcp = 1;
         DEBUG_LV3(SERIAL_PRINTVAR(wifi_dhcp));
         hci_read_u8(); // status
-        ip_addr[3] = hci_read_u8();
-        ip_addr[2] = hci_read_u8();
-        ip_addr[1] = hci_read_u8();
-        ip_addr[0] = hci_read_u8();
+        hci_read_u32_le(); // IP address
         break;
 
       case HCI_EVNT_WLAN_UNSOL_TCP_CLOSE_WAIT:
@@ -489,8 +473,8 @@ void hci_begin_first_command(uint16_t opcode, uint16_t argsSize)
   {
     if (millis() - start >= 5000)
     {
-      SERIAL_PRINTLN("Failed to detect CC3000.  Check wiring?");
-      for (;;);
+      SERIAL_PRINTLN(F("Failed to detect CC3000.  Check wiring?"));
+      for (;;) wdt_reset(); // ensuer we can reprogram
     }
     wdt_reset();
   }
@@ -699,6 +683,17 @@ void wlan_init(void)
   SPI.setBitOrder(MSBFIRST);
   SPI.setClockDivider(SPI_CLOCK_DIV2);
   delay(100);
+
+  // initialise the watchdog timer
+#if USE_WATCHDOG
+  cli();
+  wdt_reset();
+  // enter config mode
+  WDTCSR |= (1 << WDCE) | (1 << WDE);
+  // settings 8000ms timeout before reset
+  WDTCSR = (0 << WDIE) | (1 << WDE) | (1 << WDP3) | (0 << WDP2) | (0 << WDP1) | (1 << WDP0);
+  sei();
+#endif
 
   hci_begin_first_command(HCI_CMND_SIMPLE_LINK_START, 1);
   hci_write_u8(SL_PATCHES_REQUEST_DEFAULT);
@@ -1039,7 +1034,7 @@ int send(int sd, const void *buffer, int size, int flags)
     SERIAL_PRINTVAR(sd);
     SERIAL_PRINTVAR(size);
     SERIAL_PRINTVAR(flags);
-    )
+  )
 
   DEBUG_LV3(SERIAL_PRINTVAR(hci_available_buffer_count));
   wdt_reset();
@@ -1121,9 +1116,9 @@ int select(long nfds, fd_set *readsds, fd_set *writesds, fd_set *exceptsds, time
   hci_write_u32_le(0x14);
   hci_write_u32_le(0x14);
   hci_write_u32_le(timeout != NULL);
-  hci_write_u32_le(((readsds) ? *(unsigned long*)readsds : 0));
-  hci_write_u32_le(((writesds) ? *(unsigned long*)writesds : 0));
-  hci_write_u32_le(((exceptsds) ? *(unsigned long*)exceptsds : 0));
+  hci_write_u32_le(((readsds) ? * (unsigned long*)readsds : 0));
+  hci_write_u32_le(((writesds) ? * (unsigned long*)writesds : 0));
+  hci_write_u32_le(((exceptsds) ? * (unsigned long*)exceptsds : 0));
   if (timeout)
   {
     if (timeout->tv_sec == 0 && timeout->tv_usec < 5000)
@@ -1167,22 +1162,22 @@ int connect(long sd, const sockaddr *addr, long addrlen)
     SERIAL_PRINTFUNCTION();
     SERIAL_PRINTVAR(sd);
   );
-  
+
   hci_begin_command(HCI_CMND_CONNECT, 20);
   hci_write_u32_le(sd);
   hci_write_u32_le(8);
   hci_write_u32_le(8);
   hci_write_array(addr, 8);
   hci_end_command_begin_receive(HCI_CMND_CONNECT); // event has same value as command
-  
+
   hci_read_status();
 
   int result;
-  if (hci_read_u32_le() == 0) 
+  if (hci_read_u32_le() == 0)
     result = 0;
-  else 
+  else
     result = -1;
-  
+
   return result;
 }
 
@@ -1273,7 +1268,6 @@ uint16_t getFirmwareVersion()
 // support the mdnsAdvertise command. Instead this has to be
 // implemented in software. This is why we check here for the fw
 // version.
-#if CC3000_FW_VERSION < 132
 int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned short deviceServiceNameLength)
 {
   DEBUG_LV2(
@@ -1282,6 +1276,10 @@ int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned
     SERIAL_PRINTVAR(deviceServiceName);
     SERIAL_PRINTVAR(deviceServiceNameLength);
   )
+
+  if (getFirmwareVersion() >= 0x0120) {
+    return -1;
+  }
 
   if (deviceServiceNameLength > MDNS_DEVICE_SERVICE_MAX_LENGTH)
     return -1;
@@ -1293,5 +1291,27 @@ int mdnsAdvertiser(unsigned short mdnsEnabled, char *deviceServiceName, unsigned
   hci_write_array(deviceServiceName, deviceServiceNameLength);
   return hci_end_command_receive_u32_result(HCI_CMND_MDNS_ADVERTISE);
 }
-#endif
 
+/*
+* ipaddr - 32bit IP Adrress
+* buf - buffer to hold result string
+* rev - MSB/LSB byte order for IP Address
+*/
+void getIPdots(uint32_t ipaddr, char *buf, int rev)
+{
+  int stepfwd[] = {0, 8, 16, 24};
+  int steprev[] = {24, 16, 8, 0};
+
+  *buf = 0; // truncate string
+  int i, idx;
+  idx = 0;
+  for (i = 0; i < 4; i++) {
+    int step = rev ? steprev[i] : stepfwd[i];
+    uint8_t q = (uint8_t)(ipaddr >> step);
+    sprintf(buf + idx, "%u", q);
+    if (i != 3) {
+      strcat(buf, ".");
+    }
+    idx = strlen(buf);
+  }
+}
